@@ -170,9 +170,9 @@ func TestAddRemoteHTTPSkillWritesSHAAndFullName(t *testing.T) {
 		_, _ = w.Write(archive)
 	}))
 	defer server.Close()
-	oldTransport := http.DefaultTransport
-	http.DefaultTransport = server.Client().Transport
-	defer func() { http.DefaultTransport = oldTransport }()
+	oldTransport := remoteHTTPTransport
+	remoteHTTPTransport = server.Client().Transport
+	defer func() { remoteHTTPTransport = oldTransport }()
 
 	paths, err := NewPaths(t.TempDir())
 	if err != nil {
@@ -245,6 +245,53 @@ func TestResolveRemoteSourceGitHubRootURI(t *testing.T) {
 	}
 	if resolved.URI != "owner/repo" {
 		t.Fatalf("unexpected URI: %q", resolved.URI)
+	}
+}
+
+func TestDownloadArchiveRejectsOversizedResponse(t *testing.T) {
+	oldMax := maxRemoteArchiveBytes
+	maxRemoteArchiveBytes = 16
+	defer func() { maxRemoteArchiveBytes = oldMax }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("01234567890123456789"))
+	}))
+	defer server.Close()
+
+	paths, err := NewPaths(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := downloadArchive(paths, server.URL, "too-large"); err == nil {
+		t.Fatal("expected download size limit error")
+	}
+}
+
+func TestExtractTarGzRejectsLinkEntriesWithSpecificError(t *testing.T) {
+	var archive bytes.Buffer
+	gz := gzip.NewWriter(&archive)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{
+		Name:     "skill/link",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "SKILL.md",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	archivePath := filepath.Join(t.TempDir(), "skill.tar.gz")
+	if err := os.WriteFile(archivePath, archive.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := extractTarGz(archivePath, filepath.Join(t.TempDir(), "out"))
+	if err == nil || !strings.Contains(err.Error(), "link entry") {
+		t.Fatalf("expected specific link-entry error, got: %v", err)
 	}
 }
 

@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+var remoteHTTPTransport http.RoundTripper = http.DefaultTransport
+
+var maxRemoteArchiveBytes int64 = 100 << 20 // 100 MiB
+
 type ResolvedSource struct {
 	Kind     string
 	URI      string
@@ -140,7 +144,7 @@ func ParseGitHubSource(sourceSpec string) (GitHubSource, error) {
 func downloadArchive(paths Paths, downloadURL, name string) (string, string, error) {
 	client := &http.Client{
 		Timeout:   30 * time.Second,
-		Transport: http.DefaultTransport,
+		Transport: remoteHTTPTransport,
 	}
 	resp, err := client.Get(downloadURL)
 	if err != nil {
@@ -157,9 +161,19 @@ func downloadArchive(paths Paths, downloadURL, name string) (string, string, err
 	if err != nil {
 		return "", "", err
 	}
-	defer file.Close()
 	hash := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(file, hash), resp.Body); err != nil {
+	limitedBody := io.LimitReader(resp.Body, maxRemoteArchiveBytes+1)
+	n, err := io.Copy(io.MultiWriter(file, hash), limitedBody)
+	if err != nil {
+		_ = file.Close()
+		return "", "", err
+	}
+	if n > maxRemoteArchiveBytes {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return "", "", fmt.Errorf("download exceeds maximum allowed size of %d bytes", maxRemoteArchiveBytes)
+	}
+	if err := file.Close(); err != nil {
 		return "", "", err
 	}
 	return file.Name(), hex.EncodeToString(hash.Sum(nil)), nil
@@ -211,6 +225,8 @@ func extractTarGz(archivePath, dest string) error {
 			if closeErr != nil {
 				return closeErr
 			}
+		case tar.TypeSymlink, tar.TypeLink:
+			return fmt.Errorf("archive contains link entry (not allowed): %s", header.Name)
 		default:
 			return fmt.Errorf("unsupported archive entry type for %s", header.Name)
 		}

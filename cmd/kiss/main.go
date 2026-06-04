@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kiss/kiss/internal/kiss"
+	"github.com/wwulfric/kiss/internal/kiss"
 )
 
 func main() {

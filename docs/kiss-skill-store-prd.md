@@ -111,7 +111,7 @@ kiss doctor
 
 - `/kiss` 和 `$kiss` 是用户入口；底层统一调用 `kiss run`。
 - `/kiss`、`$kiss` 和 `kiss run` 不自动安装 skill；缺失时只提示用户先显式安装。
-- `kiss list` 默认只输出名称和版本；`kiss show <name>` 才显示描述和来源。
+- `kiss list` 默认按 `name<TAB>version<TAB>source.kind<TAB>full_name` 输出；`kiss show <name>` 才显示更完整元数据。
 - KISS 不应要求用户把 `$KISS_HOME/skills` 注册给任何 agent。
 - KISS 的默认安装方式应提供预编译 CLI；`npx`、`pnpm dlx`、`bunx` 只能作为可选入口。
 - 下载、更新、删除操作要可解释；失败时给出下一步建议。
