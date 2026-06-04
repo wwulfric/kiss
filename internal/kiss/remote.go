@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type ResolvedSource struct {
@@ -30,6 +31,9 @@ type GitHubSource struct {
 }
 
 func AddRemoteSkill(paths Paths, sourceSpec, name string) error {
+	if err := ValidateSkillName(name); err != nil {
+		return err
+	}
 	resolved, downloadURL, subdir, err := ResolveRemoteSource(sourceSpec)
 	if err != nil {
 		return err
@@ -88,7 +92,11 @@ func ResolveRemoteSource(sourceSpec string) (ResolvedSource, string, string, err
 		if gh.Path != "" {
 			fullName += "/" + gh.Path
 		}
-		return ResolvedSource{Kind: "github", URI: gh.Owner + "/" + gh.Repo + "/" + gh.Path, Ref: gh.Ref, Resolved: gh.Ref, FullName: fullName}, archiveURL, gh.Path, nil
+		uri := gh.Owner + "/" + gh.Repo
+		if gh.Path != "" {
+			uri += "/" + gh.Path
+		}
+		return ResolvedSource{Kind: "github", URI: uri, Ref: gh.Ref, Resolved: gh.Ref, FullName: fullName}, archiveURL, gh.Path, nil
 	}
 	if strings.HasPrefix(sourceSpec, "https://") {
 		if _, err := url.ParseRequestURI(sourceSpec); err != nil {
@@ -116,14 +124,25 @@ func ParseGitHubSource(sourceSpec string) (GitHubSource, error) {
 	if len(parts) > 2 {
 		path = strings.Join(parts[2:], "/")
 	}
-	if strings.Contains(filepath.Clean(path), "..") || strings.HasPrefix(path, "/") {
+	if strings.Contains(path, `\`) || strings.HasPrefix(path, "/") {
 		return GitHubSource{}, fmt.Errorf("github skill path must be safe relative path")
+	}
+	if path != "" {
+		for _, segment := range strings.Split(path, "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return GitHubSource{}, fmt.Errorf("github skill path must be safe relative path")
+			}
+		}
 	}
 	return GitHubSource{Owner: parts[0], Repo: parts[1], Path: path, Ref: ref}, nil
 }
 
 func downloadArchive(paths Paths, downloadURL, name string) (string, string, error) {
-	resp, err := http.Get(downloadURL)
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: http.DefaultTransport,
+	}
+	resp, err := client.Get(downloadURL)
 	if err != nil {
 		return "", "", err
 	}
@@ -147,6 +166,7 @@ func downloadArchive(paths Paths, downloadURL, name string) (string, string, err
 }
 
 func extractTarGz(archivePath, dest string) error {
+	cleanDest := filepath.Clean(dest)
 	file, err := os.Open(archivePath)
 	if err != nil {
 		return err
@@ -166,11 +186,10 @@ func extractTarGz(archivePath, dest string) error {
 		if err != nil {
 			return err
 		}
-		clean := filepath.Clean(header.Name)
-		if clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
-			return fmt.Errorf("unsafe path in archive: %s", header.Name)
+		target, err := safeArchiveTarget(cleanDest, header.Name)
+		if err != nil {
+			return err
 		}
-		target := filepath.Join(dest, clean)
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o755); err != nil {
@@ -196,6 +215,19 @@ func extractTarGz(archivePath, dest string) error {
 			return fmt.Errorf("unsupported archive entry type for %s", header.Name)
 		}
 	}
+}
+
+func safeArchiveTarget(dest, name string) (string, error) {
+	clean := filepath.Clean(name)
+	if clean == "." || filepath.IsAbs(clean) {
+		return "", fmt.Errorf("unsafe path in archive: %s", name)
+	}
+	target := filepath.Join(dest, clean)
+	rel, err := filepath.Rel(dest, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("unsafe path in archive: %s", name)
+	}
+	return target, nil
 }
 
 func findExtractedSubdir(root, subdir string) (string, error) {

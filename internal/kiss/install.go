@@ -141,6 +141,9 @@ func copySkillDir(src, dst string) error {
 		if entry.IsDir() {
 			return os.MkdirAll(target, info.Mode().Perm())
 		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("unsupported file type in skill package: %s", path)
+		}
 		return copyFile(path, target, info.Mode().Perm())
 	})
 }

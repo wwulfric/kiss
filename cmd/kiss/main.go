@@ -122,7 +122,7 @@ func runSkill(paths kiss.Paths, args []string) error {
 }
 
 func printHelp() {
-	fmt.Println(`kiss 0.2.0
+	fmt.Printf(`kiss %s
 
 Usage:
   kiss [--kiss-home <path>] add <local-path> --name <name>
@@ -131,5 +131,6 @@ Usage:
   kiss [--kiss-home <path>] show <name>
   kiss [--kiss-home <path>] remove <name>
   kiss [--kiss-home <path>] doctor
-  kiss --version`)
+  kiss --version
+`, kiss.Version)
 }

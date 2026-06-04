@@ -63,7 +63,8 @@ func formatArgs(args []string) string {
 	}
 	escaped := make([]string, len(args))
 	for i, arg := range args {
-		escaped[i] = html.EscapeString(arg)
+		singleLine := strings.NewReplacer("\r", " ", "\n", " ").Replace(arg)
+		escaped[i] = html.EscapeString(singleLine)
 	}
 	return strings.Join(escaped, " ")
 }

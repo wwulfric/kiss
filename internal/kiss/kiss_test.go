@@ -92,6 +92,25 @@ func TestRunMissingSkillDoesNotInstall(t *testing.T) {
 	}
 }
 
+func TestRunSkillArgsAreSingleLine(t *testing.T) {
+	home := t.TempDir()
+	paths, err := NewPaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := makeSkill(t, "browser-test", "0.1.0", "Use this one.")
+	if err := AddLocalSkill(paths, source, "browser-test"); err != nil {
+		t.Fatalf("add browser-test: %v", err)
+	}
+	var out bytes.Buffer
+	if err := RunSkill(paths, "browser-test", []string{"a\nb", "c\rd"}, &out); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if strings.Contains(out.String(), "- Args: a\n") || strings.Contains(out.String(), "- Args: c\r") {
+		t.Fatalf("args should not contain newlines or carriage returns:\n%s", out.String())
+	}
+}
+
 func TestAddRejectsSymlink(t *testing.T) {
 	home := t.TempDir()
 	paths, err := NewPaths(home)
@@ -198,6 +217,80 @@ func TestParseGitHubSource(t *testing.T) {
 	}
 	if resolved.FullName != "github:vercel-labs/agent-skills/skills/browser-test" || resolved.Ref != "v1.2.3" || subdir != "skills/browser-test" {
 		t.Fatalf("unexpected resolved=%+v subdir=%q", resolved, subdir)
+	}
+}
+
+func TestParseGitHubSourcePathValidation(t *testing.T) {
+	got, err := ParseGitHubSource("github:owner/repo/skills/v1..0/browser")
+	if err != nil {
+		t.Fatalf("expected '..' within segment to be allowed, got: %v", err)
+	}
+	if got.Path != "skills/v1..0/browser" {
+		t.Fatalf("unexpected path: %q", got.Path)
+	}
+	for _, source := range []string{
+		"github:owner/repo/skills/../browser",
+		`github:owner/repo/skills\browser`,
+	} {
+		if _, err := ParseGitHubSource(source); err == nil {
+			t.Fatalf("expected invalid path for %q", source)
+		}
+	}
+}
+
+func TestResolveRemoteSourceGitHubRootURI(t *testing.T) {
+	resolved, _, _, err := ResolveRemoteSource("github:owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.URI != "owner/repo" {
+		t.Fatalf("unexpected URI: %q", resolved.URI)
+	}
+}
+
+func TestSafeArchiveTarget(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "extract")
+	if _, err := safeArchiveTarget(dest, "skill/SKILL.md"); err != nil {
+		t.Fatalf("expected safe path, got: %v", err)
+	}
+	for _, name := range []string{"../evil", "root/../../evil"} {
+		if _, err := safeArchiveTarget(dest, name); err == nil {
+			t.Fatalf("expected traversal path to be rejected: %q", name)
+		}
+	}
+}
+
+func TestManifestEntryValidation(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "skill")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes..md"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "kiss.skill.toml"), []byte("entry = \"notes..md\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadManifest(dir); err != nil {
+		t.Fatalf("expected notes..md to be allowed, got: %v", err)
+	}
+	for _, entry := range []string{`"..\\notes.md"`, `"../notes.md"`} {
+		if err := os.WriteFile(filepath.Join(dir, "kiss.skill.toml"), []byte("entry = "+entry+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadManifest(dir); err == nil {
+			t.Fatalf("expected unsafe entry to be rejected: %s", entry)
+		}
+	}
+}
+
+func TestAddRemoteSkillRejectsInvalidNameBeforeDownload(t *testing.T) {
+	paths, err := NewPaths(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AddRemoteSkill(paths, "https://example.com/skill.tar.gz", "../bad"); err == nil {
+		t.Fatal("expected invalid skill name error")
 	}
 }
 

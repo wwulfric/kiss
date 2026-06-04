@@ -73,8 +73,13 @@ func LoadManifest(skillDir string) (Manifest, error) {
 	if manifest.RunnerType != "markdown" {
 		return Manifest{}, fmt.Errorf("runner type %q is not supported in this iteration", manifest.RunnerType)
 	}
-	if filepath.IsAbs(manifest.Entry) || strings.Contains(filepath.Clean(manifest.Entry), "..") {
+	if filepath.IsAbs(manifest.Entry) || strings.Contains(manifest.Entry, `\`) || strings.HasPrefix(manifest.Entry, "/") {
 		return Manifest{}, fmt.Errorf("entry must be a safe relative path")
+	}
+	for _, segment := range strings.Split(manifest.Entry, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return Manifest{}, fmt.Errorf("entry must be a safe relative path")
+		}
 	}
 	if _, err := os.Stat(filepath.Join(skillDir, manifest.Entry)); err != nil {
 		return Manifest{}, fmt.Errorf("entry %q not found: %w", manifest.Entry, err)

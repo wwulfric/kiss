@@ -101,7 +101,21 @@ func SaveMetadataDB(paths Paths, db MetadataDB) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, paths.MetadataDB)
+	backup := paths.MetadataDB + ".old"
+	_ = os.Remove(backup)
+	if _, err := os.Stat(paths.MetadataDB); err == nil {
+		if err := os.Rename(paths.MetadataDB, backup); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(tmpName, paths.MetadataDB); err != nil {
+		if _, statErr := os.Stat(backup); statErr == nil {
+			_ = os.Rename(backup, paths.MetadataDB)
+		}
+		return err
+	}
+	_ = os.Remove(backup)
+	return nil
 }
 
 func UpsertSkillMetadata(paths Paths, metadata SkillMetadata) error {
