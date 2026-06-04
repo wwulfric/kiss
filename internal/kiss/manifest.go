@@ -89,9 +89,19 @@ func LoadManifest(skillDir string) (Manifest, error) {
 
 func parseTomlScalar(value string) string {
 	value = strings.TrimSpace(value)
+	// Quoted string: extract content between the first pair of double quotes,
+	// ignoring any trailing comment outside the quotes.
+	if strings.HasPrefix(value, "\"") {
+		end := strings.Index(value[1:], "\"")
+		if end >= 0 {
+			return value[1 : end+1]
+		}
+		// Unterminated quote: fall through to unquoted handling.
+		value = strings.TrimPrefix(value, "\"")
+	}
+	// Unquoted: strip inline comment (` #` suffix) and trim whitespace.
 	if hash := strings.Index(value, " #"); hash >= 0 {
 		value = strings.TrimSpace(value[:hash])
 	}
-	value = strings.Trim(value, "\"")
 	return value
 }

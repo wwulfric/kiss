@@ -7,7 +7,7 @@ KISS（Keep It Stupid Simple）是一个面向 coding agent 的显式 skill stor
 - **显式调用**：不依赖 agent 启动时的全局 skill discovery。
 - **隔离存储**：KISS skill 不进入 agent 全局目录，也不进入项目目录。
 - **显式安装**：本地没有 skill 时提示先执行 `kiss add ...`，不在 `run` 中自动拉取。
-- **本地元数据**：安装后写入 `$KISS_HOME/skills.db.json`，方便 `list/show/update` 查询；元数据同时保存本地短名 `name` 和来源限定全称 `full_name`。
+- **本地元数据**：安装后写入 `$KISS_HOME/skills.db.json`，方便 `list/show/remove/doctor` 查询；元数据同时保存本地短名 `name` 和来源限定全称 `full_name`。
 - **最小协议**：一个 `SKILL.md` 加可选脚本、资源和 manifest 即可。
 
 产品需求见 [`docs/kiss-skill-store-prd.md`](docs/kiss-skill-store-prd.md)，技术架构见 [`docs/kiss-skill-store-architecture.md`](docs/kiss-skill-store-architecture.md)。

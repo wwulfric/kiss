@@ -6,7 +6,7 @@
 
 - KISS 管理的 skill 必须存放在 KISS 专属目录中，不写入 coding agent 的全局 skill 目录，也不写入当前项目目录。
 - coding agent 不应在会话启动时枚举、读取或总结 KISS 管理的 skill。
-- 只有当用户显式调用 `/kiss <skill_name> ...`、`$kiss <skill_name> ...` 或等价 CLI 命令时，才解析、下载、加载并执行对应 skill。
+- 只有当用户显式调用 `/kiss <skill_name> ...`、`$kiss <skill_name> ...` 或等价 CLI 命令时，才加载并执行已安装的对应 skill；`run` 不得自动下载或安装 skill。
 - 优先保持实现简单、可审计、可删除；避免后台同步、自动全局注入和复杂的多 agent 适配层。
 
 ## 工作约定

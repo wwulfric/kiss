@@ -130,7 +130,7 @@ func copySkillDir(src, dst string) error {
 		if clean == "." {
 			return nil
 		}
-		if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+		if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || filepath.IsAbs(clean) {
 			return fmt.Errorf("unsafe path in skill package: %s", rel)
 		}
 		target := filepath.Join(dst, clean)

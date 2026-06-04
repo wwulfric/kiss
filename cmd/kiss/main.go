@@ -93,13 +93,13 @@ func runAdd(paths kiss.Paths, args []string) error {
 			i++
 		default:
 			if source != "" {
-				return fmt.Errorf("usage: kiss add <local-path> --name <name>")
+				return fmt.Errorf("usage: kiss add <source> --name <name>")
 			}
 			source = args[i]
 		}
 	}
 	if source == "" {
-		return fmt.Errorf("usage: kiss add <local-path> --name <name>")
+		return fmt.Errorf("usage: kiss add <source> --name <name>")
 	}
 	if name == "" {
 		return fmt.Errorf("--name is required")
@@ -125,7 +125,7 @@ func printHelp() {
 	fmt.Printf(`kiss %s
 
 Usage:
-  kiss [--kiss-home <path>] add <local-path> --name <name>
+  kiss [--kiss-home <path>] add <source> --name <name>
   kiss [--kiss-home <path>] run <name> [args...]
   kiss [--kiss-home <path>] list
   kiss [--kiss-home <path>] show <name>

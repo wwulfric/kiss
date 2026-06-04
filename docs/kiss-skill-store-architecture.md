@@ -75,7 +75,7 @@ $KISS_HOME/
 说明：
 
 - `config.toml`：registry 列表、默认 trust policy、网络超时。
-- `skills.db.json`：本地已安装 skill 的元数据数据库，供 `list/show/update` 查询。
+- `skills.db.json`：本地已安装 skill 的元数据数据库，供 `list/show/remove/doctor` 查询。
 - `registry.lock`：远程 registry 名称解析结果；仅在显式远程安装或更新时使用。
 - `skills/<name>`：已安装 skill。目录名是 KISS 本地别名，不必等于上游仓库名。
 - `.kiss-install.json`：安装来源、commit/tag、sha256、安装时间、KISS 版本。
@@ -118,7 +118,7 @@ commands = []
 - `version`：语义化版本或上游 commit/tag。
 - `description`：只供 `kiss list` 和人工查看；不会在 agent 启动时暴露。
 - `entry`：默认 `SKILL.md`。
-- `runner.type`：MVP 支持 `markdown` 和 `command`。
+- `runner.type`：本轮仅支持 `markdown`；`command` 为后续迭代。
 - `permissions`：声明性权限，不自动提权；由 CLI、agent 或用户策略决定是否允许。
 
 ## 5. 本地元数据数据库
