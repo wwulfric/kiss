@@ -128,15 +128,8 @@ func ParseGitHubSource(sourceSpec string) (GitHubSource, error) {
 	if len(parts) > 2 {
 		path = strings.Join(parts[2:], "/")
 	}
-	if strings.Contains(path, `\`) || strings.HasPrefix(path, "/") {
+	if err := validateOptionalSafeRelativePath(path); err != nil {
 		return GitHubSource{}, fmt.Errorf("github skill path must be safe relative path")
-	}
-	if path != "" {
-		for _, segment := range strings.Split(path, "/") {
-			if segment == "" || segment == "." || segment == ".." {
-				return GitHubSource{}, fmt.Errorf("github skill path must be safe relative path")
-			}
-		}
 	}
 	return GitHubSource{Owner: parts[0], Repo: parts[1], Path: path, Ref: ref}, nil
 }
@@ -234,6 +227,13 @@ func extractTarGz(archivePath, dest string) error {
 }
 
 func safeArchiveTarget(dest, name string) (string, error) {
+	if strings.Contains(name, `\`) {
+		return "", fmt.Errorf("unsafe path in archive: %s", name)
+	}
+	trimmed := strings.Trim(name, "/")
+	if strings.Contains(trimmed, "//") {
+		return "", fmt.Errorf("unsafe path in archive: %s", name)
+	}
 	clean := filepath.Clean(name)
 	if clean == "." || filepath.IsAbs(clean) {
 		return "", fmt.Errorf("unsafe path in archive: %s", name)

@@ -2,10 +2,10 @@ package kiss
 
 import (
 	"fmt"
-	"html"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -64,7 +64,7 @@ func formatArgs(args []string) string {
 	escaped := make([]string, len(args))
 	for i, arg := range args {
 		singleLine := strings.NewReplacer("\r", " ", "\n", " ").Replace(arg)
-		escaped[i] = html.EscapeString(singleLine)
+		escaped[i] = strconv.Quote(singleLine)
 	}
 	return strings.Join(escaped, " ")
 }

@@ -300,7 +300,7 @@ func TestSafeArchiveTarget(t *testing.T) {
 	if _, err := safeArchiveTarget(dest, "skill/SKILL.md"); err != nil {
 		t.Fatalf("expected safe path, got: %v", err)
 	}
-	for _, name := range []string{"../evil", "root/../../evil"} {
+	for _, name := range []string{"../evil", "root/../../evil", "a//b", `a\..\b`} {
 		if _, err := safeArchiveTarget(dest, name); err == nil {
 			t.Fatalf("expected traversal path to be rejected: %q", name)
 		}
@@ -328,6 +328,27 @@ func TestManifestEntryValidation(t *testing.T) {
 		if _, err := LoadManifest(dir); err == nil {
 			t.Fatalf("expected unsafe entry to be rejected: %s", entry)
 		}
+	}
+}
+
+func TestManifestParsesQuotedHashAndComment(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "skill")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "description = \"foo # bar\" # trailing comment\n"
+	if err := os.WriteFile(filepath.Join(dir, "kiss.skill.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Description != "foo # bar" {
+		t.Fatalf("expected description to preserve # inside quoted string, got %q", got.Description)
 	}
 }
 
