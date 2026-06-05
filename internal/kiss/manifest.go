@@ -65,7 +65,7 @@ func LoadManifest(skillDir string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("runner type %q is not supported in this iteration", manifest.RunnerType)
 	}
 	if err := validateSafeRelativePath(manifest.Entry); err != nil {
-		return Manifest{}, fmt.Errorf("entry must be a safe relative path")
+		return Manifest{}, fmt.Errorf("entry %q must be a safe relative path: %w", manifest.Entry, err)
 	}
 	if _, err := os.Stat(filepath.Join(skillDir, manifest.Entry)); err != nil {
 		return Manifest{}, fmt.Errorf("entry %q not found: %w", manifest.Entry, err)

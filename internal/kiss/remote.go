@@ -18,6 +18,7 @@ import (
 var remoteHTTPTransport http.RoundTripper = http.DefaultTransport
 
 var maxRemoteArchiveBytes int64 = 100 << 20 // 100 MiB
+var maxExtractedArchiveBytes int64 = 200 << 20 // 200 MiB
 
 type ResolvedSource struct {
 	Kind     string
@@ -129,7 +130,7 @@ func ParseGitHubSource(sourceSpec string) (GitHubSource, error) {
 		path = strings.Join(parts[2:], "/")
 	}
 	if err := validateOptionalSafeRelativePath(path); err != nil {
-		return GitHubSource{}, fmt.Errorf("github skill path must be safe relative path")
+		return GitHubSource{}, fmt.Errorf("github skill path %q must be safe relative path: %w", path, err)
 	}
 	return GitHubSource{Owner: parts[0], Repo: parts[1], Path: path, Ref: ref}, nil
 }
@@ -138,6 +139,12 @@ func downloadArchive(paths Paths, downloadURL, name string) (string, string, err
 	client := &http.Client{
 		Timeout:   30 * time.Second,
 		Transport: remoteHTTPTransport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect to non-https URL is not allowed: %s", req.URL.String())
+			}
+			return nil
+		},
 	}
 	resp, err := client.Get(downloadURL)
 	if err != nil {
@@ -159,6 +166,7 @@ func downloadArchive(paths Paths, downloadURL, name string) (string, string, err
 	n, err := io.Copy(io.MultiWriter(file, hash), limitedBody)
 	if err != nil {
 		_ = file.Close()
+		_ = os.Remove(file.Name())
 		return "", "", err
 	}
 	if n > maxRemoteArchiveBytes {
@@ -185,6 +193,7 @@ func extractTarGz(archivePath, dest string) error {
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
+	var totalExtracted int64
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
@@ -198,11 +207,19 @@ func extractTarGz(archivePath, dest string) error {
 			return err
 		}
 		switch header.Typeflag {
+		case tar.TypeXHeader, tar.TypeXGlobalHeader, tar.TypeGNULongName, tar.TypeGNULongLink:
+			continue
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return err
 			}
 		case tar.TypeReg, tar.TypeRegA:
+			if header.Size < 0 {
+				return fmt.Errorf("invalid archive entry size for %s", header.Name)
+			}
+			if totalExtracted+header.Size > maxExtractedArchiveBytes {
+				return fmt.Errorf("extracted archive exceeds maximum allowed size of %d bytes", maxExtractedArchiveBytes)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
@@ -210,14 +227,21 @@ func extractTarGz(archivePath, dest string) error {
 			if err != nil {
 				return err
 			}
-			_, copyErr := io.Copy(out, tr)
+			n, copyErr := io.Copy(out, io.LimitReader(tr, header.Size+1))
 			closeErr := out.Close()
 			if copyErr != nil {
 				return copyErr
 			}
+			if n > header.Size {
+				return fmt.Errorf("archive entry %s exceeds declared size", header.Name)
+			}
+			if n != header.Size {
+				return fmt.Errorf("archive entry %s size mismatch: %w", header.Name, io.ErrUnexpectedEOF)
+			}
 			if closeErr != nil {
 				return closeErr
 			}
+			totalExtracted += n
 		case tar.TypeSymlink, tar.TypeLink:
 			return fmt.Errorf("archive contains link entry (not allowed): %s", header.Name)
 		default:

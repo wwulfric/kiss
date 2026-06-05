@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -295,6 +296,58 @@ func TestExtractTarGzRejectsLinkEntriesWithSpecificError(t *testing.T) {
 	}
 }
 
+func TestExtractTarGzAllowsPAXGlobalHeader(t *testing.T) {
+	var archive bytes.Buffer
+	gz := gzip.NewWriter(&archive)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: "pax_global_header", Typeflag: tar.TypeXGlobalHeader, Size: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "skill/", Mode: 0o755, Typeflag: tar.TypeDir}); err != nil {
+		t.Fatal(err)
+	}
+	body := "hello\n"
+	if err := tw.WriteHeader(&tar.Header{Name: "skill/SKILL.md", Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(t.TempDir(), "skill.tar.gz")
+	if err := os.WriteFile(archivePath, archive.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "out")
+	if err := extractTarGz(archivePath, dest); err != nil {
+		t.Fatalf("expected PAX global header to be accepted, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "skill", "SKILL.md")); err != nil {
+		t.Fatalf("expected extracted file, got: %v", err)
+	}
+}
+
+func TestExtractTarGzRejectsOversizedExtractedContent(t *testing.T) {
+	oldMax := maxExtractedArchiveBytes
+	maxExtractedArchiveBytes = 4
+	defer func() { maxExtractedArchiveBytes = oldMax }()
+
+	archive := makeSkillArchive(t, "skill", "remote", "0.2.0", "Remote instructions.")
+	archivePath := filepath.Join(t.TempDir(), "skill.tar.gz")
+	if err := os.WriteFile(archivePath, archive, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := extractTarGz(archivePath, filepath.Join(t.TempDir(), "out"))
+	if err == nil || !strings.Contains(err.Error(), "exceeds maximum allowed size") {
+		t.Fatalf("expected extracted size limit error, got: %v", err)
+	}
+}
+
 func TestSafeArchiveTarget(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "extract")
 	if _, err := safeArchiveTarget(dest, "skill/SKILL.md"); err != nil {
@@ -331,6 +384,23 @@ func TestManifestEntryValidation(t *testing.T) {
 	}
 }
 
+func TestManifestEntryValidationErrorIncludesEntryAndCause(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "skill")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "kiss.skill.toml"), []byte("entry = \"../notes.md\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadManifest(dir)
+	if err == nil {
+		t.Fatal("expected unsafe entry error")
+	}
+	if !strings.Contains(err.Error(), `entry "../notes.md"`) || !strings.Contains(err.Error(), "safe relative path") {
+		t.Fatalf("expected detailed entry validation error, got: %v", err)
+	}
+}
+
 func TestManifestParsesQuotedHashAndComment(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "skill")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -360,6 +430,122 @@ func TestAddRemoteSkillRejectsInvalidNameBeforeDownload(t *testing.T) {
 	if err := AddRemoteSkill(paths, "https://example.com/skill.tar.gz", "../bad"); err == nil {
 		t.Fatal("expected invalid skill name error")
 	}
+}
+
+func TestParseGitHubSourceIncludesInvalidPathInError(t *testing.T) {
+	_, err := ParseGitHubSource("github:owner/repo/skills/../browser")
+	if err == nil {
+		t.Fatal("expected invalid github sub-path error")
+	}
+	if !strings.Contains(err.Error(), "skills/../browser") || !strings.Contains(err.Error(), "safe relative path") {
+		t.Fatalf("expected path and cause in error, got: %v", err)
+	}
+}
+
+func TestDownloadArchiveRejectsRedirectToHTTP(t *testing.T) {
+	insecureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("unexpected"))
+	}))
+	defer insecureServer.Close()
+
+	redirectServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, insecureServer.URL, http.StatusFound)
+	}))
+	defer redirectServer.Close()
+
+	oldTransport := remoteHTTPTransport
+	remoteHTTPTransport = redirectServer.Client().Transport
+	defer func() { remoteHTTPTransport = oldTransport }()
+
+	paths, err := NewPaths(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := downloadArchive(paths, redirectServer.URL+"/skill.tar.gz", "redirect"); err == nil || !strings.Contains(err.Error(), "non-https") {
+		t.Fatalf("expected redirect rejection, got: %v", err)
+	}
+}
+
+func TestDownloadArchiveRemovesPartialFileOnCopyError(t *testing.T) {
+	oldTransport := remoteHTTPTransport
+	remoteHTTPTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       &failingReadCloser{data: []byte("partial"), failErr: errors.New("boom")},
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})
+	defer func() { remoteHTTPTransport = oldTransport }()
+
+	paths, err := NewPaths(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := downloadArchive(paths, "https://example.com/skill.tar.gz", "partial"); err == nil {
+		t.Fatal("expected copy error")
+	}
+	entries, err := os.ReadDir(filepath.Join(paths.Cache, "downloads"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no leftover partial files, found %d", len(entries))
+	}
+}
+
+func TestInstallSkillRollsBackOnMetadataFailure(t *testing.T) {
+	paths, err := NewPaths(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := makeSkill(t, "rollback", "0.1.0", "old instructions")
+	if err := AddLocalSkill(paths, original, "rollback"); err != nil {
+		t.Fatalf("add original: %v", err)
+	}
+	updated := makeSkill(t, "rollback", "0.2.0", "new instructions")
+	badMetadataPath := filepath.Join(paths.Home, "bad-metadata")
+	if err := os.MkdirAll(badMetadataPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths.MetadataDB = badMetadataPath
+
+	err = AddLocalSkill(paths, updated, "rollback")
+	if err == nil {
+		t.Fatal("expected metadata write failure")
+	}
+	content, readErr := os.ReadFile(filepath.Join(paths.SkillDir("rollback"), "SKILL.md"))
+	if readErr != nil {
+		t.Fatalf("expected rollback skill dir to exist, read err: %v", readErr)
+	}
+	if !strings.Contains(string(content), "old instructions") {
+		t.Fatalf("expected original content restored, got: %q", string(content))
+	}
+}
+
+type roundTripFunc func(req *http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type failingReadCloser struct {
+	data    []byte
+	read    bool
+	failErr error
+}
+
+func (f *failingReadCloser) Read(p []byte) (int, error) {
+	if !f.read {
+		f.read = true
+		n := copy(p, f.data)
+		return n, nil
+	}
+	return 0, f.failErr
+}
+
+func (f *failingReadCloser) Close() error {
+	return nil
 }
 
 func makeSkillArchive(t *testing.T, root, name, version, instructions string) []byte {

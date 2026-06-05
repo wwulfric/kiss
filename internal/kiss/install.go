@@ -94,7 +94,6 @@ func installSkillFromDir(paths Paths, sourcePath, name, fullName string, source 
 		}
 		return err
 	}
-	_ = os.RemoveAll(backup)
 	metadata := SkillMetadata{
 		Name:         name,
 		FullName:     fullName,
@@ -111,7 +110,15 @@ func installSkillFromDir(paths Paths, sourcePath, name, fullName string, source 
 		UpdatedAt:     installedAt,
 		KissVersion:   Version,
 	}
-	return UpsertSkillMetadata(paths, metadata)
+	if err := UpsertSkillMetadata(paths, metadata); err != nil {
+		_ = os.RemoveAll(dest)
+		if _, statErr := os.Stat(backup); statErr == nil {
+			_ = os.Rename(backup, dest)
+		}
+		return err
+	}
+	_ = os.RemoveAll(backup)
+	return nil
 }
 
 func copySkillDir(src, dst string) error {
