@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to publish, for example v0.1.0. Dispatch this workflow on the same tag ref."
+        required: true
+        type: string
+
+run-name: Release ${{ inputs.version }}
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      KISS_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Validate release version
+        run: |
+          case "$KISS_VERSION" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "version must be a semantic tag like v0.1.0" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$GITHUB_REF" != "refs/tags/$KISS_VERSION" ]; then
+            echo "dispatch this workflow on refs/tags/$KISS_VERSION; got $GITHUB_REF" >&2
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build release artifacts
+        run: scripts/build-release.sh
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign checksums
+        run: cosign sign-blob --yes --output-signature dist/checksums.txt.sig --output-certificate dist/checksums.txt.pem dist/checksums.txt
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt
+            dist/checksums.txt.sig
+            dist/checksums.txt.pem
+            dist/kiss.rb

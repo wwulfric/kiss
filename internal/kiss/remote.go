@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,9 +17,12 @@ import (
 )
 
 var remoteHTTPTransport http.RoundTripper = http.DefaultTransport
+var githubAPIBaseURL = "https://api.github.com"
+var githubCodeloadBaseURL = "https://codeload.github.com"
 
-var maxRemoteArchiveBytes int64 = 100 << 20 // 100 MiB
+var maxRemoteArchiveBytes int64 = 100 << 20    // 100 MiB
 var maxExtractedArchiveBytes int64 = 200 << 20 // 200 MiB
+var maxGitHubAPIResponseBytes int64 = 1 << 20  // 1 MiB
 
 type ResolvedSource struct {
 	Kind     string
@@ -36,6 +40,10 @@ type GitHubSource struct {
 }
 
 func AddRemoteSkill(paths Paths, sourceSpec, name string) error {
+	return AddRemoteSkillWithExpectedSHA(paths, sourceSpec, name, "")
+}
+
+func AddRemoteSkillWithExpectedSHA(paths Paths, sourceSpec, name, expectedSHA256 string) error {
 	if err := ValidateSkillName(name); err != nil {
 		return err
 	}
@@ -49,6 +57,10 @@ func AddRemoteSkill(paths Paths, sourceSpec, name string) error {
 	archivePath, sum, err := downloadArchive(paths, downloadURL, name)
 	if err != nil {
 		return err
+	}
+	if expectedSHA256 != "" && !strings.EqualFold(sum, expectedSHA256) {
+		_ = os.Remove(archivePath)
+		return fmt.Errorf("sha256 mismatch for %s: expected %s, got %s", sourceSpec, expectedSHA256, sum)
 	}
 	tmpParent := filepath.Join(paths.Home, ".tmp")
 	if err := os.MkdirAll(tmpParent, 0o755); err != nil {
@@ -92,7 +104,11 @@ func ResolveRemoteSource(sourceSpec string) (ResolvedSource, string, string, err
 		if err != nil {
 			return ResolvedSource{}, "", "", err
 		}
-		archiveURL := fmt.Sprintf("https://codeload.github.com/%s/%s/tar.gz/%s", gh.Owner, gh.Repo, url.PathEscape(gh.Ref))
+		resolvedCommit, err := ResolveGitHubCommit(gh)
+		if err != nil {
+			return ResolvedSource{}, "", "", err
+		}
+		archiveURL := fmt.Sprintf("%s/%s/%s/tar.gz/%s", strings.TrimRight(githubCodeloadBaseURL, "/"), gh.Owner, gh.Repo, url.PathEscape(resolvedCommit))
 		fullName := fmt.Sprintf("github:%s/%s", gh.Owner, gh.Repo)
 		if gh.Path != "" {
 			fullName += "/" + gh.Path
@@ -101,7 +117,7 @@ func ResolveRemoteSource(sourceSpec string) (ResolvedSource, string, string, err
 		if gh.Path != "" {
 			uri += "/" + gh.Path
 		}
-		return ResolvedSource{Kind: "github", URI: uri, Ref: gh.Ref, Resolved: gh.Ref, FullName: fullName}, archiveURL, gh.Path, nil
+		return ResolvedSource{Kind: "github", URI: uri, Ref: gh.Ref, Resolved: resolvedCommit, FullName: fullName}, archiveURL, gh.Path, nil
 	}
 	if strings.HasPrefix(sourceSpec, "https://") {
 		if _, err := url.ParseRequestURI(sourceSpec); err != nil {
@@ -110,6 +126,51 @@ func ResolveRemoteSource(sourceSpec string) (ResolvedSource, string, string, err
 		return ResolvedSource{Kind: "https", URI: sourceSpec, FullName: sourceSpec}, sourceSpec, "", nil
 	}
 	return ResolvedSource{}, "", "", fmt.Errorf("unsupported remote source %q", sourceSpec)
+}
+
+func ResolveGitHubCommit(source GitHubSource) (string, error) {
+	commitURL := fmt.Sprintf("%s/repos/%s/%s/commits/%s", strings.TrimRight(githubAPIBaseURL, "/"), source.Owner, source.Repo, url.PathEscape(source.Ref))
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: remoteHTTPTransport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect to non-https URL is not allowed: %s", req.URL.String())
+			}
+			return nil
+		},
+	}
+	req, err := http.NewRequest(http.MethodGet, commitURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "kiss-skill-store")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("resolve GitHub commit failed: %s", resp.Status)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxGitHubAPIResponseBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if int64(len(data)) > maxGitHubAPIResponseBytes {
+		return "", fmt.Errorf("GitHub commit response exceeds maximum allowed size of %d bytes", maxGitHubAPIResponseBytes)
+	}
+	var body struct {
+		SHA string `json:"sha"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return "", err
+	}
+	if body.SHA == "" {
+		return "", fmt.Errorf("resolve GitHub commit failed: response did not contain sha")
+	}
+	return body.SHA, nil
 }
 
 func ParseGitHubSource(sourceSpec string) (GitHubSource, error) {

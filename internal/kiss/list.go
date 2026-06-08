@@ -47,7 +47,11 @@ func RemoveSkill(paths Paths, name string) error {
 	if err := os.RemoveAll(paths.SkillDir(name)); err != nil {
 		return err
 	}
-	return DeleteSkillMetadata(paths, name)
+	lockErr := DeleteRegistryLockEntry(paths, name)
+	if err := DeleteSkillMetadata(paths, name); err != nil {
+		return err
+	}
+	return lockErr
 }
 
 func Doctor(paths Paths, out io.Writer) error {

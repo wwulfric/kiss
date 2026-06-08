@@ -61,8 +61,10 @@ func LoadManifest(skillDir string) (Manifest, error) {
 	if manifest.RunnerType == "" {
 		manifest.RunnerType = "markdown"
 	}
-	if manifest.RunnerType != "markdown" {
-		return Manifest{}, fmt.Errorf("runner type %q is not supported in this iteration", manifest.RunnerType)
+	switch manifest.RunnerType {
+	case "markdown":
+	default:
+		return Manifest{}, fmt.Errorf("runner type %q is not supported; KISS only provides markdown skill context", manifest.RunnerType)
 	}
 	if err := validateSafeRelativePath(manifest.Entry); err != nil {
 		return Manifest{}, fmt.Errorf("entry %q must be a safe relative path: %w", manifest.Entry, err)

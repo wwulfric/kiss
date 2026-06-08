@@ -53,7 +53,8 @@ func RunSkill(paths Paths, name string, args []string, out io.Writer) error {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "- Only this skill was loaded.")
 	fmt.Fprintln(out, "- Do not inspect $KISS_HOME unless the user explicitly asks.")
-	fmt.Fprintln(out, "- Command runner is disabled in this iteration; follow Markdown instructions only.")
+	fmt.Fprintln(out, "- KISS did not call any model provider; the invoking agent decides how to use these instructions.")
+	fmt.Fprintln(out, "- KISS does not execute skill scripts; the invoking agent decides what work to perform.")
 	return nil
 }
 

@@ -42,6 +42,12 @@ func run(args []string) error {
 		return runAdd(paths, remaining[1:])
 	case "run":
 		return runSkill(paths, remaining[1:])
+	case "registry":
+		return runRegistry(paths, remaining[1:])
+	case "update":
+		return runUpdate(paths, remaining[1:])
+	case "adapter":
+		return runAdapter(paths, remaining[1:])
 	case "list":
 		return kiss.ListSkills(paths, os.Stdout)
 	case "show":
@@ -102,6 +108,9 @@ func runAdd(paths kiss.Paths, args []string) error {
 		return fmt.Errorf("usage: kiss add <source> --name <name>")
 	}
 	if name == "" {
+		if !isRemoteSource(source) && !looksLikePath(source) {
+			return kiss.AddRegistrySkill(paths, source)
+		}
 		return fmt.Errorf("--name is required")
 	}
 	if isRemoteSource(source) {
@@ -114,11 +123,132 @@ func isRemoteSource(source string) bool {
 	return strings.HasPrefix(source, "https://") || strings.HasPrefix(source, "github:")
 }
 
+func looksLikePath(source string) bool {
+	return strings.HasPrefix(source, ".") || strings.HasPrefix(source, "~") || strings.ContainsAny(source, `/\`)
+}
+
 func runSkill(paths kiss.Paths, args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: kiss run <name> [args...]")
 	}
-	return kiss.RunSkill(paths, args[0], args[1:], os.Stdout)
+	runArgs := args[1:]
+	if len(runArgs) > 0 && runArgs[0] == "--" {
+		runArgs = runArgs[1:]
+	}
+	return kiss.RunSkill(paths, args[0], runArgs, os.Stdout)
+}
+
+func runRegistry(paths kiss.Paths, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: kiss registry <add|list|require-signature|trust> ...")
+	}
+	switch args[0] {
+	case "add":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: kiss registry add <name> <url-or-path>")
+		}
+		return kiss.AddRegistry(paths, args[1], args[2])
+	case "list":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: kiss registry list")
+		}
+		return kiss.ListRegistries(paths, os.Stdout)
+	case "require-signature":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: kiss registry require-signature <name>")
+		}
+		return kiss.RequireRegistrySignature(paths, args[1])
+	case "trust":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: kiss registry trust <name> <public-key-base64>")
+		}
+		return kiss.TrustRegistryKey(paths, args[1], args[2])
+	default:
+		return fmt.Errorf("unknown registry command %q", args[0])
+	}
+}
+
+func runUpdate(paths kiss.Paths, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: kiss update <name> [--yes]")
+	}
+	name := ""
+	yes := false
+	for _, arg := range args {
+		switch arg {
+		case "--yes", "-y":
+			yes = true
+		default:
+			if name != "" {
+				return fmt.Errorf("usage: kiss update <name> [--yes]")
+			}
+			name = arg
+		}
+	}
+	if name == "" {
+		return fmt.Errorf("usage: kiss update <name> [--yes]")
+	}
+	return kiss.UpdateSkill(paths, name, yes, os.Stdout)
+}
+
+func runAdapter(_ kiss.Paths, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: kiss adapter <print|install|uninstall> ...")
+	}
+	switch args[0] {
+	case "print":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: kiss adapter print <slash|skill|shell|powershell>")
+		}
+		return kiss.PrintAdapter(args[1], os.Stdout)
+	case "install":
+		return runAdapterInstall(args[1:])
+	case "uninstall":
+		return runAdapterUninstall(args[1:])
+	default:
+		return fmt.Errorf("unknown adapter command %q", args[0])
+	}
+}
+
+func runAdapterInstall(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: kiss adapter install <slash|skill|shell|powershell> --path <path> [--force]")
+	}
+	kind := args[0]
+	path := ""
+	force := false
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--path":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--path requires a value")
+			}
+			path = args[i+1]
+			i++
+		case "--force":
+			force = true
+		default:
+			return fmt.Errorf("usage: kiss adapter install <slash|skill|shell|powershell> --path <path> [--force]")
+		}
+	}
+	return kiss.InstallAdapter(kind, path, force)
+}
+
+func runAdapterUninstall(args []string) error {
+	path := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--path":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--path requires a value")
+			}
+			path = args[i+1]
+			i++
+		default:
+			return fmt.Errorf("usage: kiss adapter uninstall --path <path>")
+		}
+	}
+	return kiss.UninstallAdapter(path)
 }
 
 func printHelp() {
@@ -126,7 +256,16 @@ func printHelp() {
 
 Usage:
   kiss [--kiss-home <path>] add <source> --name <name>
+  kiss [--kiss-home <path>] add <registry-skill>
   kiss [--kiss-home <path>] run <name> [args...]
+  kiss [--kiss-home <path>] registry add <name> <url-or-path>
+  kiss [--kiss-home <path>] registry list
+  kiss [--kiss-home <path>] registry require-signature <name>
+  kiss [--kiss-home <path>] registry trust <name> <public-key-base64>
+  kiss [--kiss-home <path>] update <name> [--yes]
+  kiss [--kiss-home <path>] adapter print <slash|skill|shell|powershell>
+  kiss [--kiss-home <path>] adapter install <slash|skill|shell|powershell> --path <path> [--force]
+  kiss [--kiss-home <path>] adapter uninstall --path <path>
   kiss [--kiss-home <path>] list
   kiss [--kiss-home <path>] show <name>
   kiss [--kiss-home <path>] remove <name>
