@@ -6,11 +6,13 @@ import (
 )
 
 type Paths struct {
-	Home       string
-	Skills     string
-	MetadataDB string
-	Cache      string
-	Logs       string
+	Home         string
+	Skills       string
+	MetadataDB   string
+	Config       string
+	RegistryLock string
+	Cache        string
+	Logs         string
 }
 
 func ResolveHome(explicit string) (string, error) {
@@ -36,11 +38,13 @@ func NewPaths(explicit string) (Paths, error) {
 		return Paths{}, err
 	}
 	return Paths{
-		Home:       home,
-		Skills:     filepath.Join(home, "skills"),
-		MetadataDB: filepath.Join(home, "skills.db.json"),
-		Cache:      filepath.Join(home, "cache"),
-		Logs:       filepath.Join(home, "logs"),
+		Home:         home,
+		Skills:       filepath.Join(home, "skills"),
+		MetadataDB:   filepath.Join(home, "skills.db.json"),
+		Config:       filepath.Join(home, "config.toml"),
+		RegistryLock: filepath.Join(home, "registry.lock"),
+		Cache:        filepath.Join(home, "cache"),
+		Logs:         filepath.Join(home, "logs"),
 	}, nil
 }
 

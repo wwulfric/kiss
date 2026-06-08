@@ -19,4 +19,4 @@ type InstallRecord struct {
 	KissVersion string `json:"kiss_version"`
 }
 
-const Version = "0.2.0"
+var Version = "dev"
