@@ -6,28 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 )
-
-var skillNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
-func ValidateSkillName(name string) error {
-	if !skillNamePattern.MatchString(name) {
-		return fmt.Errorf("invalid skill name %q", name)
-	}
-	return nil
-}
-
-func AddLocalSkill(paths Paths, sourcePath, name string) error {
-	absSource, err := filepath.Abs(sourcePath)
-	if err != nil {
-		return err
-	}
-	source := SourceMetadata{Kind: "local", URI: absSource}
-	return installSkillFromDir(paths, absSource, name, "local:"+absSource, source)
-}
 
 func installSkillFromDir(paths Paths, sourcePath, name, fullName string, source SourceMetadata) error {
 	if err := ValidateSkillName(name); err != nil {
@@ -60,7 +41,7 @@ func installSkillFromDir(paths Paths, sourcePath, name, fullName string, source 
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	if err := copySkillDir(absSource, tmpDir); err != nil {
 		return err
@@ -80,6 +61,7 @@ func installSkillFromDir(paths Paths, sourcePath, name, fullName string, source 
 		return err
 	}
 
+	// 先保留旧目录，等新目录和 metadata 都成功写入后再清理，失败时尽量回滚。
 	dest := paths.SkillDir(name)
 	backup := dest + ".old"
 	_ = os.RemoveAll(backup)
@@ -126,6 +108,7 @@ func copySkillDir(src, dst string) error {
 		if walkErr != nil {
 			return walkErr
 		}
+		// 不跟随 symlink，避免 skill 包把内容指向 store 外部路径。
 		if entry.Type()&os.ModeSymlink != 0 {
 			return fmt.Errorf("symlink is not allowed in skill package: %s", path)
 		}
@@ -163,7 +146,7 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return err

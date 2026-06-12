@@ -2,7 +2,8 @@ param(
     [string]$Repo = $(if ($env:KISS_REPO) { $env:KISS_REPO } else { "wwulfric/kiss" }),
     [string]$Version = $(if ($env:KISS_VERSION) { $env:KISS_VERSION } else { "latest" }),
     [string]$InstallDir = $(if ($env:KISS_INSTALL_DIR) { $env:KISS_INSTALL_DIR } elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "Programs\kiss\bin" } else { Join-Path $HOME ".kiss\bin" }),
-    [switch]$NoPathUpdate
+    [switch]$NoPathUpdate,
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +14,9 @@ if ($env:OS -and $env:OS -ne "Windows_NT") {
 
 if ($env:KISS_NO_PATH_UPDATE -eq "1") {
     $NoPathUpdate = $true
+}
+if ($env:KISS_FORCE_INSTALL -eq "1") {
+    $Force = $true
 }
 
 $verifySignature = $env:KISS_VERIFY_SIGNATURE -eq "1"
@@ -32,8 +36,6 @@ switch ($arch) {
 
 $baseUrl = "https://github.com/$Repo/releases/download/$artifactVersion"
 $archive = "kiss_${artifactVersion}_windows_${artifactArch}.tar.gz"
-$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("kiss-install-" + [System.Guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
 
 function Download-File {
     param(
@@ -41,6 +43,43 @@ function Download-File {
         [string]$OutFile
     )
     Invoke-WebRequest -Uri $Uri -OutFile $OutFile -Headers @{ "User-Agent" = "kiss-installer" }
+}
+
+function Convert-KissVersion {
+    param(
+        [string]$Value
+    )
+    if ($Value -match '^v?(\d+)\.(\d+)\.(\d+)$') {
+        return [version]"$($matches[1]).$($matches[2]).$($matches[3])"
+    }
+    return $null
+}
+
+function Get-InstalledKissPath {
+    $target = Join-Path $InstallDir "kiss.exe"
+    if (Test-Path $target) {
+        return $target
+    }
+    $command = Get-Command kiss.exe -ErrorAction SilentlyContinue
+    if (-not $command) {
+        $command = Get-Command kiss -ErrorAction SilentlyContinue
+    }
+    if ($command) {
+        return $command.Source
+    }
+    return $null
+}
+
+function Get-KissVersion {
+    param(
+        [string]$Path
+    )
+    try {
+        return (& $Path --version 2>$null | Select-Object -First 1).Trim()
+    }
+    catch {
+        return $null
+    }
 }
 
 function Path-Contains {
@@ -75,6 +114,36 @@ function Normalize-PathEntry {
         return $Entry.Trim().TrimEnd('\')
     }
 }
+
+$currentKissPath = Get-InstalledKissPath
+if (-not $Force -and $currentKissPath) {
+    $currentVersion = Get-KissVersion $currentKissPath
+    if ($currentVersion) {
+        $currentSemver = Convert-KissVersion $currentVersion
+        $targetSemver = Convert-KissVersion $artifactVersion
+        if ($currentSemver -and $targetSemver) {
+            if ($currentSemver -eq $targetSemver) {
+                Write-Host "kiss $currentVersion is already installed at $currentKissPath; target $artifactVersion is the same. Skipping download and install."
+                return
+            }
+            if ($currentSemver -gt $targetSemver) {
+                Write-Host "Installed kiss $currentVersion at $currentKissPath is newer than target $artifactVersion. Skipping download and install."
+                return
+            }
+            Write-Host "Updating kiss from $currentVersion to $artifactVersion."
+        }
+        elseif ($currentVersion -eq $artifactVersion) {
+            Write-Host "kiss $currentVersion is already installed at $currentKissPath; target $artifactVersion is the same. Skipping download and install."
+            return
+        }
+        else {
+            Write-Host "Cannot compare installed version $currentVersion with target $artifactVersion; continuing with install."
+        }
+    }
+}
+
+$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("kiss-install-" + [System.Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
 
 try {
     $archivePath = Join-Path $tempDir $archive

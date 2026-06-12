@@ -6,6 +6,7 @@ import (
 	"os"
 )
 
+// ListSkills writes the installed skill list in a compact tab-separated format.
 func ListSkills(paths Paths, out io.Writer) error {
 	if err := paths.EnsureBase(); err != nil {
 		return err
@@ -14,12 +15,14 @@ func ListSkills(paths Paths, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	writer := errWriter{out: out}
 	for _, item := range items {
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", item.Name, item.Version, item.Source.Kind, item.FullName)
+		writer.printf("%s\t%s\t%s\t%s\n", item.Name, item.Version, item.Source.Kind, item.FullName)
 	}
-	return nil
+	return writer.err
 }
 
+// ShowSkill writes one installed skill's metadata as JSON.
 func ShowSkill(paths Paths, name string, out io.Writer) error {
 	if err := ValidateSkillName(name); err != nil {
 		return err
@@ -37,6 +40,7 @@ func ShowSkill(paths Paths, name string, out io.Writer) error {
 	return WriteSkillMetadata(out, metadata)
 }
 
+// RemoveSkill deletes an installed skill and removes its metadata entry.
 func RemoveSkill(paths Paths, name string) error {
 	if err := ValidateSkillName(name); err != nil {
 		return err
@@ -47,21 +51,22 @@ func RemoveSkill(paths Paths, name string) error {
 	if err := os.RemoveAll(paths.SkillDir(name)); err != nil {
 		return err
 	}
-	lockErr := DeleteRegistryLockEntry(paths, name)
 	if err := DeleteSkillMetadata(paths, name); err != nil {
 		return err
 	}
-	return lockErr
+	return nil
 }
 
+// Doctor checks and prints the local KISS store configuration.
 func Doctor(paths Paths, out io.Writer) error {
 	if err := paths.EnsureBase(); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "KISS version: %s\n", Version)
-	fmt.Fprintf(out, "KISS_HOME: %s\n", paths.Home)
-	fmt.Fprintf(out, "Skills dir: %s\n", paths.Skills)
-	fmt.Fprintf(out, "Metadata DB: %s\n", paths.MetadataDB)
-	fmt.Fprintln(out, "Status: ok")
-	return nil
+	writer := errWriter{out: out}
+	writer.printf("KISS version: %s\n", Version)
+	writer.printf("KISS_HOME: %s\n", paths.Home)
+	writer.printf("Skills dir: %s\n", paths.Skills)
+	writer.printf("Metadata DB: %s\n", paths.MetadataDB)
+	writer.println("Status: ok")
+	return writer.err
 }

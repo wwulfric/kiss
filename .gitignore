@@ -1,0 +1,14 @@
+# IDE and OS files
+.DS_Store
+.idea/
+
+# Local build outputs
+/bin/
+/dist/
+/kiss
+*.test
+*.exe
+
+# Test and coverage outputs
+coverage.out
+*.coverprofile
