@@ -8,13 +8,16 @@ import (
 	"sort"
 )
 
+// MetadataSchemaVersion 是 skills.db.json 当前支持的 schema version。
 const MetadataSchemaVersion = 1
 
+// MetadataDB 是 KISS store 的本地 skill 索引。
 type MetadataDB struct {
 	SchemaVersion int                      `json:"schema_version"`
 	Skills        map[string]SkillMetadata `json:"skills"`
 }
 
+// SkillMetadata 记录一个已安装 skill 的 manifest、source 和安装位置。
 type SkillMetadata struct {
 	Name          string         `json:"name"`
 	FullName      string         `json:"full_name"`
@@ -29,6 +32,7 @@ type SkillMetadata struct {
 	KissVersion   string         `json:"kiss_version"`
 }
 
+// SourceMetadata 记录 skill 的安装来源和可复现更新所需的信息。
 type SourceMetadata struct {
 	Kind     string `json:"kind"`
 	URI      string `json:"uri"`
@@ -37,11 +41,13 @@ type SourceMetadata struct {
 	SHA256   string `json:"sha256"`
 }
 
+// RunnerMetadata 记录 KISS 当前支持的 Markdown runner 入口。
 type RunnerMetadata struct {
 	Type  string `json:"type"`
 	Entry string `json:"entry"`
 }
 
+// EnsureMetadataDB 确保 skills.db.json 存在。
 func EnsureMetadataDB(paths Paths) error {
 	if _, err := os.Stat(paths.MetadataDB); err == nil {
 		return nil
@@ -52,6 +58,7 @@ func EnsureMetadataDB(paths Paths) error {
 	return SaveMetadataDB(paths, db)
 }
 
+// LoadMetadataDB 读取并校验 metadata DB。
 func LoadMetadataDB(paths Paths) (MetadataDB, error) {
 	if err := EnsureMetadataDB(paths); err != nil {
 		return MetadataDB{}, err
@@ -76,6 +83,7 @@ func LoadMetadataDB(paths Paths) (MetadataDB, error) {
 	return db, nil
 }
 
+// SaveMetadataDB 写入 metadata DB，并在失败时尽量保留旧文件。
 func SaveMetadataDB(paths Paths, db MetadataDB) error {
 	if db.SchemaVersion == 0 {
 		db.SchemaVersion = MetadataSchemaVersion
@@ -93,7 +101,7 @@ func SaveMetadataDB(paths Paths, db MetadataDB) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
@@ -103,6 +111,7 @@ func SaveMetadataDB(paths Paths, db MetadataDB) error {
 	}
 	backup := paths.MetadataDB + ".old"
 	_ = os.Remove(backup)
+	// 使用临时文件和旧文件备份，降低 CLI 中断时留下半截 JSON 的概率。
 	if _, err := os.Stat(paths.MetadataDB); err == nil {
 		if err := os.Rename(paths.MetadataDB, backup); err != nil {
 			return err
@@ -118,6 +127,7 @@ func SaveMetadataDB(paths Paths, db MetadataDB) error {
 	return nil
 }
 
+// UpsertSkillMetadata 新增或替换某个 skill 的 metadata。
 func UpsertSkillMetadata(paths Paths, metadata SkillMetadata) error {
 	db, err := LoadMetadataDB(paths)
 	if err != nil {
@@ -127,6 +137,7 @@ func UpsertSkillMetadata(paths Paths, metadata SkillMetadata) error {
 	return SaveMetadataDB(paths, db)
 }
 
+// DeleteSkillMetadata 从 metadata DB 删除某个 skill。
 func DeleteSkillMetadata(paths Paths, name string) error {
 	db, err := LoadMetadataDB(paths)
 	if err != nil {
@@ -136,6 +147,7 @@ func DeleteSkillMetadata(paths Paths, name string) error {
 	return SaveMetadataDB(paths, db)
 }
 
+// GetSkillMetadata 查询某个 skill 的 metadata。
 func GetSkillMetadata(paths Paths, name string) (SkillMetadata, bool, error) {
 	db, err := LoadMetadataDB(paths)
 	if err != nil {
@@ -145,6 +157,7 @@ func GetSkillMetadata(paths Paths, name string) (SkillMetadata, bool, error) {
 	return metadata, ok, nil
 }
 
+// ListSkillMetadata 按 skill name 排序返回所有 metadata。
 func ListSkillMetadata(paths Paths) ([]SkillMetadata, error) {
 	db, err := LoadMetadataDB(paths)
 	if err != nil {
@@ -162,6 +175,7 @@ func ListSkillMetadata(paths Paths) ([]SkillMetadata, error) {
 	return items, nil
 }
 
+// WriteSkillMetadata 以 JSON 格式输出单个 skill 的 metadata。
 func WriteSkillMetadata(out io.Writer, metadata SkillMetadata) error {
 	data, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {

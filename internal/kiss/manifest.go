@@ -8,6 +8,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// LoadManifest 读取 skill manifest；没有 kiss.skill.toml 时回退到根目录 SKILL.md。
 func LoadManifest(skillDir string) (Manifest, error) {
 	manifest := Manifest{Entry: "SKILL.md", RunnerType: "markdown"}
 	path := filepath.Join(skillDir, "kiss.skill.toml")
@@ -61,6 +62,7 @@ func LoadManifest(skillDir string) (Manifest, error) {
 	if manifest.RunnerType == "" {
 		manifest.RunnerType = "markdown"
 	}
+	// KISS 只向外层 agent 提供 Markdown instructions，不执行 command runner。
 	switch manifest.RunnerType {
 	case "markdown":
 	default:

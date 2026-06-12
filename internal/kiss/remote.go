@@ -24,6 +24,7 @@ var maxRemoteArchiveBytes int64 = 100 << 20    // 100 MiB
 var maxExtractedArchiveBytes int64 = 200 << 20 // 200 MiB
 var maxGitHubAPIResponseBytes int64 = 1 << 20  // 1 MiB
 
+// ResolvedSource 是规范化后的 remote source，以及写入 metadata 的稳定身份信息。
 type ResolvedSource struct {
 	Kind     string
 	URI      string
@@ -32,6 +33,7 @@ type ResolvedSource struct {
 	FullName string
 }
 
+// GitHubSource 是 github:owner/repo[/path]#ref 的解析结果。
 type GitHubSource struct {
 	Owner string
 	Repo  string
@@ -39,11 +41,8 @@ type GitHubSource struct {
 	Ref   string
 }
 
+// AddRemoteSkill 从 GitHub source 或 HTTPS tarball 安装 skill。
 func AddRemoteSkill(paths Paths, sourceSpec, name string) error {
-	return AddRemoteSkillWithExpectedSHA(paths, sourceSpec, name, "")
-}
-
-func AddRemoteSkillWithExpectedSHA(paths Paths, sourceSpec, name, expectedSHA256 string) error {
 	if err := ValidateSkillName(name); err != nil {
 		return err
 	}
@@ -58,10 +57,6 @@ func AddRemoteSkillWithExpectedSHA(paths Paths, sourceSpec, name, expectedSHA256
 	if err != nil {
 		return err
 	}
-	if expectedSHA256 != "" && !strings.EqualFold(sum, expectedSHA256) {
-		_ = os.Remove(archivePath)
-		return fmt.Errorf("sha256 mismatch for %s: expected %s, got %s", sourceSpec, expectedSHA256, sum)
-	}
 	tmpParent := filepath.Join(paths.Home, ".tmp")
 	if err := os.MkdirAll(tmpParent, 0o755); err != nil {
 		return err
@@ -70,11 +65,11 @@ func AddRemoteSkillWithExpectedSHA(paths Paths, sourceSpec, name, expectedSHA256
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(extractDir)
+	defer func() { _ = os.RemoveAll(extractDir) }()
 	if err := extractTarGz(archivePath, extractDir); err != nil {
 		return err
 	}
-	skillDir := extractDir
+	var skillDir string
 	if subdir != "" {
 		found, err := findExtractedSubdir(extractDir, subdir)
 		if err != nil {
@@ -98,6 +93,7 @@ func AddRemoteSkillWithExpectedSHA(paths Paths, sourceSpec, name, expectedSHA256
 	return installSkillFromDir(paths, skillDir, name, resolved.FullName, resolvedSource)
 }
 
+// ResolveRemoteSource 把 remote source 解析成 metadata、下载 URL 和可选 archive 子目录。
 func ResolveRemoteSource(sourceSpec string) (ResolvedSource, string, string, error) {
 	if strings.HasPrefix(sourceSpec, "github:") {
 		gh, err := ParseGitHubSource(sourceSpec)
@@ -128,6 +124,7 @@ func ResolveRemoteSource(sourceSpec string) (ResolvedSource, string, string, err
 	return ResolvedSource{}, "", "", fmt.Errorf("unsupported remote source %q", sourceSpec)
 }
 
+// ResolveGitHubCommit 把 GitHub ref 解析成 commit SHA，用于记录可复现的 metadata。
 func ResolveGitHubCommit(source GitHubSource) (string, error) {
 	commitURL := fmt.Sprintf("%s/repos/%s/%s/commits/%s", strings.TrimRight(githubAPIBaseURL, "/"), source.Owner, source.Repo, url.PathEscape(source.Ref))
 	client := &http.Client{
@@ -150,7 +147,7 @@ func ResolveGitHubCommit(source GitHubSource) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("resolve GitHub commit failed: %s", resp.Status)
 	}
@@ -173,6 +170,7 @@ func ResolveGitHubCommit(source GitHubSource) (string, error) {
 	return body.SHA, nil
 }
 
+// ParseGitHubSource 解析 github:owner/repo[/path]#ref 语法。
 func ParseGitHubSource(sourceSpec string) (GitHubSource, error) {
 	spec := strings.TrimPrefix(sourceSpec, "github:")
 	ref := "main"
@@ -211,7 +209,7 @@ func downloadArchive(paths Paths, downloadURL, name string) (string, string, err
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", "", fmt.Errorf("download failed: %s", resp.Status)
 	}
@@ -242,17 +240,18 @@ func downloadArchive(paths Paths, downloadURL, name string) (string, string, err
 }
 
 func extractTarGz(archivePath, dest string) error {
+	// 远程 archive 只允许普通文件和目录；拒绝 link 和越界路径，避免解包写出目标目录。
 	cleanDest := filepath.Clean(dest)
 	file, err := os.Open(archivePath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	gz, err := gzip.NewReader(file)
 	if err != nil {
 		return err
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
 	var totalExtracted int64
 	for {
@@ -274,7 +273,7 @@ func extractTarGz(archivePath, dest string) error {
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return err
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if header.Size < 0 {
 				return fmt.Errorf("invalid archive entry size for %s", header.Name)
 			}

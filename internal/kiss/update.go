@@ -16,6 +16,7 @@ type updatePreview struct {
 	SourceSHA256 string
 }
 
+// UpdateSkill 从已记录的 source 预览或执行一次显式更新。
 func UpdateSkill(paths Paths, name string, yes bool, out io.Writer) error {
 	if err := ValidateSkillName(name); err != nil {
 		return err
@@ -30,44 +31,28 @@ func UpdateSkill(paths Paths, name string, yes bool, out io.Writer) error {
 	if !ok {
 		return fmt.Errorf("skill %q is not installed; run kiss add <source> --name %s first", name, name)
 	}
-	target, hasRegistryTarget, err := registryUpdateTarget(paths, name)
+	sourceSpec, err := sourceSpecFromMetadata(metadata)
 	if err != nil {
 		return err
 	}
-	sourceSpec := ""
-	expectedSHA256 := ""
-	if hasRegistryTarget {
-		sourceSpec = target.SourceSpec
-		expectedSHA256 = target.SHA256
-	} else {
-		sourceSpec, err = sourceSpecFromMetadata(metadata)
-		if err != nil {
-			return err
-		}
-	}
 	if !yes {
+		// 默认只打印计划，避免 update 在用户确认前改变已安装 skill。
 		current, err := previewInstalledSkill(paths, name)
 		if err != nil {
 			return err
 		}
-		preview, cleanup, err := previewSourceSpec(paths, sourceSpec, name, expectedSHA256)
+		preview, cleanup, err := previewSourceSpec(paths, sourceSpec, name)
 		if err != nil {
 			return err
 		}
 		defer cleanup()
-		printUpdatePlan(out, name, metadata, current, preview, sourceSpec, expectedSHA256, hasRegistryTarget, target)
-		return nil
+		return printUpdatePlan(out, name, metadata, current, preview, sourceSpec)
 	}
-	if err := installSourceSpec(paths, sourceSpec, name, expectedSHA256); err != nil {
+	if err := installSourceSpec(paths, sourceSpec, name); err != nil {
 		return err
 	}
-	if hasRegistryTarget {
-		if err := UpsertRegistryLockEntry(paths, target); err != nil {
-			return err
-		}
-	}
-	fmt.Fprintf(out, "Updated %s from %s\n", name, sourceSpec)
-	return nil
+	_, err = fmt.Fprintf(out, "Updated %s from %s\n", name, sourceSpec)
+	return err
 }
 
 func previewInstalledSkill(paths Paths, name string) (updatePreview, error) {
@@ -83,9 +68,9 @@ func previewInstalledSkill(paths Paths, name string) (updatePreview, error) {
 	return updatePreview{Manifest: manifest, EntryContent: content}, nil
 }
 
-func previewSourceSpec(paths Paths, sourceSpec, name, expectedSHA256 string) (updatePreview, func(), error) {
+func previewSourceSpec(paths Paths, sourceSpec, name string) (updatePreview, func(), error) {
 	if strings.HasPrefix(sourceSpec, "https://") || strings.HasPrefix(sourceSpec, "github:") {
-		return previewRemoteSource(paths, sourceSpec, name, expectedSHA256)
+		return previewRemoteSource(paths, sourceSpec, name)
 	}
 	manifest, err := LoadManifest(sourceSpec)
 	if err != nil {
@@ -98,7 +83,7 @@ func previewSourceSpec(paths Paths, sourceSpec, name, expectedSHA256 string) (up
 	return updatePreview{Manifest: manifest, EntryContent: content}, func() {}, nil
 }
 
-func previewRemoteSource(paths Paths, sourceSpec, name, expectedSHA256 string) (updatePreview, func(), error) {
+func previewRemoteSource(paths Paths, sourceSpec, name string) (updatePreview, func(), error) {
 	_, downloadURL, subdir, err := ResolveRemoteSource(sourceSpec)
 	if err != nil {
 		return updatePreview{}, func() {}, err
@@ -109,10 +94,6 @@ func previewRemoteSource(paths Paths, sourceSpec, name, expectedSHA256 string) (
 	archivePath, sum, err := downloadArchive(paths, downloadURL, name)
 	if err != nil {
 		return updatePreview{}, func() {}, err
-	}
-	if expectedSHA256 != "" && !strings.EqualFold(sum, expectedSHA256) {
-		_ = os.Remove(archivePath)
-		return updatePreview{}, func() {}, fmt.Errorf("sha256 mismatch for %s: expected %s, got %s", sourceSpec, expectedSHA256, sum)
 	}
 	tmpParent := filepath.Join(paths.Home, ".tmp")
 	if err := os.MkdirAll(tmpParent, 0o755); err != nil {
@@ -127,7 +108,7 @@ func previewRemoteSource(paths Paths, sourceSpec, name, expectedSHA256 string) (
 		cleanup()
 		return updatePreview{}, func() {}, err
 	}
-	skillDir := extractDir
+	var skillDir string
 	if subdir != "" {
 		found, err := findExtractedSubdir(extractDir, subdir)
 		if err != nil {
@@ -156,73 +137,55 @@ func previewRemoteSource(paths Paths, sourceSpec, name, expectedSHA256 string) (
 	return updatePreview{Manifest: manifest, EntryContent: content, SourceSHA256: sum}, cleanup, nil
 }
 
-func printUpdatePlan(out io.Writer, name string, metadata SkillMetadata, current, targetPreview updatePreview, sourceSpec, expectedSHA256 string, hasRegistryTarget bool, target RegistryLockEntry) {
+func printUpdatePlan(out io.Writer, name string, metadata SkillMetadata, current, targetPreview updatePreview, sourceSpec string) error {
 	currentEntrySum := sha256Bytes(current.EntryContent)
 	targetEntrySum := sha256Bytes(targetPreview.EntryContent)
 	entryStatus := "unchanged"
 	if currentEntrySum != targetEntrySum {
 		entryStatus = "changed"
 	}
-	targetSHA := expectedSHA256
-	if targetSHA == "" {
-		targetSHA = targetPreview.SourceSHA256
+	writer := errWriter{out: out}
+	writer.printf("# KISS update plan: %s\n\n", name)
+	writer.printf("- Current version: %s\n", current.Manifest.Version)
+	writer.printf("- Target version: %s\n", targetPreview.Manifest.Version)
+	writer.printf("- Current runner: %s\n", current.Manifest.RunnerType)
+	writer.printf("- Target runner: %s\n", targetPreview.Manifest.RunnerType)
+	writer.printf("- Current entry: %s\n", current.Manifest.Entry)
+	writer.printf("- Target entry: %s\n", targetPreview.Manifest.Entry)
+	writer.printf("- Entry content: %s\n", entryStatus)
+	writer.printf("- Current entry sha256: %s\n", currentEntrySum)
+	writer.printf("- Target entry sha256: %s\n", targetEntrySum)
+	writer.printf("- Current source: %s\n", sourceSpecFromMetadataForDisplay(metadata))
+	writer.printf("- Target source: %s\n", sourceSpec)
+	if targetPreview.SourceSHA256 != "" {
+		writer.printf("- Target sha256: %s\n", targetPreview.SourceSHA256)
 	}
-	fmt.Fprintf(out, "# KISS update plan: %s\n\n", name)
-	fmt.Fprintf(out, "- Current version: %s\n", current.Manifest.Version)
-	fmt.Fprintf(out, "- Target version: %s\n", targetPreview.Manifest.Version)
-	fmt.Fprintf(out, "- Current runner: %s\n", current.Manifest.RunnerType)
-	fmt.Fprintf(out, "- Target runner: %s\n", targetPreview.Manifest.RunnerType)
-	fmt.Fprintf(out, "- Current entry: %s\n", current.Manifest.Entry)
-	fmt.Fprintf(out, "- Target entry: %s\n", targetPreview.Manifest.Entry)
-	fmt.Fprintf(out, "- Entry content: %s\n", entryStatus)
-	fmt.Fprintf(out, "- Current entry sha256: %s\n", currentEntrySum)
-	fmt.Fprintf(out, "- Target entry sha256: %s\n", targetEntrySum)
-	fmt.Fprintf(out, "- Current source: %s\n", sourceSpecFromMetadataForDisplay(metadata))
-	fmt.Fprintf(out, "- Target source: %s\n", sourceSpec)
-	if targetSHA != "" {
-		fmt.Fprintf(out, "- Target sha256: %s\n", targetSHA)
-	}
-	if hasRegistryTarget {
-		fmt.Fprintf(out, "- Registry: %s\n", target.Registry)
-	}
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "## Entry diff")
-	fmt.Fprintln(out)
+	writer.println()
+	writer.println("## Entry diff")
+	writer.println()
 	if entryStatus == "unchanged" {
-		fmt.Fprintln(out, "Entry content unchanged; no diff.")
+		writer.println("Entry content unchanged; no diff.")
 	} else {
 		diff := buildEntryDiff(current.Manifest.Entry, targetPreview.Manifest.Entry, current.EntryContent, targetPreview.EntryContent)
 		if diff.Note != "" {
-			fmt.Fprintln(out, diff.Note)
+			writer.println(diff.Note)
 		}
 		if diff.Text != "" {
 			fence := markdownFenceFor(diff.Text)
-			fmt.Fprintf(out, "%sdiff\n%s\n%s\n", fence, diff.Text, fence)
+			writer.printf("%sdiff\n%s\n%s\n", fence, diff.Text, fence)
 			if diff.Truncated {
-				fmt.Fprintf(out, "\nDiff truncated to %d lines.\n", updateDiffMaxLines)
+				writer.printf("\nDiff truncated to %d lines.\n", updateDiffMaxLines)
 			}
 		}
 	}
-	fmt.Fprintln(out)
-	fmt.Fprintf(out, "Run `kiss update %s --yes` to apply.\n", name)
+	writer.println()
+	writer.printf("Run `kiss update %s --yes` to apply.\n", name)
+	return writer.err
 }
 
 func sha256Bytes(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
-}
-
-func registryUpdateTarget(paths Paths, name string) (RegistryLockEntry, bool, error) {
-	if _, ok, err := GetRegistryLockEntry(paths, name); err != nil {
-		return RegistryLockEntry{}, false, err
-	} else if !ok {
-		return RegistryLockEntry{}, false, nil
-	}
-	entry, err := ResolveRegistrySkill(paths, name)
-	if err != nil {
-		return RegistryLockEntry{}, false, err
-	}
-	return entry, true, nil
 }
 
 func sourceSpecFromMetadata(metadata SkillMetadata) (string, error) {
@@ -240,6 +203,13 @@ func sourceSpecFromMetadata(metadata SkillMetadata) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported source kind %q", metadata.Source.Kind)
 	}
+}
+
+func installSourceSpec(paths Paths, sourceSpec, name string) error {
+	if strings.HasPrefix(sourceSpec, "https://") || strings.HasPrefix(sourceSpec, "github:") {
+		return AddRemoteSkill(paths, sourceSpec, name)
+	}
+	return AddLocalSkill(paths, sourceSpec, name)
 }
 
 func sourceSpecFromMetadataForDisplay(metadata SkillMetadata) string {

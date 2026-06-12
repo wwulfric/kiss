@@ -5,16 +5,16 @@ import (
 	"path/filepath"
 )
 
+// Paths 集中保存 KISS 自己管理的目录和元数据文件位置。
 type Paths struct {
-	Home         string
-	Skills       string
-	MetadataDB   string
-	Config       string
-	RegistryLock string
-	Cache        string
-	Logs         string
+	Home       string
+	Skills     string
+	MetadataDB string
+	Cache      string
+	Logs       string
 }
 
+// ResolveHome 按显式参数、KISS_HOME、XDG_DATA_HOME 和用户 home 的顺序解析 KISS_HOME。
 func ResolveHome(explicit string) (string, error) {
 	if explicit != "" {
 		return filepath.Abs(explicit)
@@ -32,24 +32,24 @@ func ResolveHome(explicit string) (string, error) {
 	return filepath.Abs(filepath.Join(home, ".local", "share", "kiss"))
 }
 
+// NewPaths 根据 KISS_HOME 构造 store、cache、logs 和 metadata 路径。
 func NewPaths(explicit string) (Paths, error) {
 	home, err := ResolveHome(explicit)
 	if err != nil {
 		return Paths{}, err
 	}
 	return Paths{
-		Home:         home,
-		Skills:       filepath.Join(home, "skills"),
-		MetadataDB:   filepath.Join(home, "skills.db.json"),
-		Config:       filepath.Join(home, "config.toml"),
-		RegistryLock: filepath.Join(home, "registry.lock"),
-		Cache:        filepath.Join(home, "cache"),
-		Logs:         filepath.Join(home, "logs"),
+		Home:       home,
+		Skills:     filepath.Join(home, "skills"),
+		MetadataDB: filepath.Join(home, "skills.db.json"),
+		Cache:      filepath.Join(home, "cache"),
+		Logs:       filepath.Join(home, "logs"),
 	}, nil
 }
 
+// EnsureBase 创建 KISS 运行所需的基础目录和 metadata DB。
 func (p Paths) EnsureBase() error {
-	for _, dir := range []string{p.Home, p.Skills, filepath.Join(p.Cache, "downloads"), filepath.Join(p.Cache, "git"), p.Logs} {
+	for _, dir := range []string{p.Home, p.Skills, filepath.Join(p.Cache, "downloads"), p.Logs} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
@@ -57,6 +57,7 @@ func (p Paths) EnsureBase() error {
 	return EnsureMetadataDB(p)
 }
 
+// SkillDir 返回某个已安装 skill 在 KISS store 中的目录。
 func (p Paths) SkillDir(name string) string {
 	return filepath.Join(p.Skills, name)
 }
