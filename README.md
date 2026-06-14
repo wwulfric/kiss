@@ -40,6 +40,8 @@ irm https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.ps1 | i
 npx skills add wwulfric/kiss
 ```
 
+如果要让 Codex、Claude Code 等 agent 代为安装，可把 [`docs/agent-installation-guide.md`](docs/agent-installation-guide.md) 交给它执行。
+
 再把要使用的 skill 安装到 KISS 专属目录：
 
 ```bash

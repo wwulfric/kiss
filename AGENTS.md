@@ -77,6 +77,14 @@ KISS bridge skill
   skills/kiss/SKILL.md
     提供给 Vercel Skills / skills.sh 兼容工具安装的 KISS bridge skill。
 
+产品与安装文档
+  docs/kiss-skill-store-prd.md
+    KISS 的产品定位、目标、非目标、用户故事和路线图。
+  docs/kiss-skill-store-architecture.md
+    KISS 的架构边界、目录布局、add/run 协议和实现约束。
+  docs/agent-installation-guide.md
+    给 Codex、Claude Code 等 agent 使用的 KISS CLI 与 bridge skill 安装指导。
+
 项目私有 agent skills
   .agents/skills/release/SKILL.md
     仅用于本项目发布：验证、打 tag、触发手动 GitHub Release workflow、校验产物。

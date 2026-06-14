@@ -28,6 +28,7 @@ Use stdout from that command as current-turn context, then continue the user's t
 Rules:
 
 - Load only the skill named by the user.
+- If the requested skill is exactly `kiss`, refuse the request. `/kiss kiss` and `$kiss kiss` are recursive invocations of this bridge skill and must not call `kiss run kiss`.
 - Do not inspect, list, summarize, preload, or synchronize `$KISS_HOME/skills`.
 - Do not install, update, remove, or modify KISS-managed skills from this bridge.
 - Do not call any model provider on behalf of KISS.

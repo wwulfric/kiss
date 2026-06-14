@@ -110,6 +110,7 @@ kiss doctor
 | FR-6 | 用户可以 list、update、remove、doctor | P1 |
 | FR-7 | 用户可以查看 skill 来源、版本、sha256、安装路径和安装时间 | P1 |
 | FR-8 | 用户可以通过 `npx skills add wwulfric/kiss` 安装 KISS bridge skill，让 agent 把显式 `/kiss` 请求转成 `kiss run`；`--skill kiss` 可作为显式指定写法 | P1 |
+| FR-9 | KISS bridge skill 必须拒绝 `/kiss kiss` 和 `$kiss kiss`，避免递归调用自身 | P0 |
 | NFR-1 | 默认安装形态不要求普通用户预装 Node、Bun 或 TypeScript 运行时 | P0 |
 | NFR-2 | 本地必须保存 skill 元数据数据库，供 `list/show/update` 查询，不依赖 agent 扫描 skill 内容 | P0 |
 | NFR-3 | skill 元数据必须同时保存本地短名 `name` 和来源限定全称 `full_name` | P0 |
@@ -122,6 +123,7 @@ kiss doctor
 - `/kiss` 和 `$kiss` 是用户入口；底层统一调用 `kiss run`。
 - `/kiss`、`$kiss` 和 `kiss run` 不自动安装 skill；缺失时只提示用户先显式安装。
 - KISS bridge skill 是支持 Vercel Skills / skills.sh 的 agent 的推荐接入方式；它的职责是把用户输入 `/kiss <skill> [args...]` 转成 `kiss run <skill> [args...]`，再把 stdout 作为当前轮上下文交给 agent。
+- `/kiss kiss` 和 `$kiss kiss` 是递归调用 KISS bridge skill 的无效请求，bridge skill 必须直接拒绝，不能执行 `kiss run kiss`。
 - 在纯终端直接运行 `kiss run` 时，默认输出可被 agent 消费的 Markdown envelope，而不是 standalone LLM 对话结果。
 - `kiss list` 默认按 `name<TAB>version<TAB>source.kind<TAB>full_name` 输出；`kiss show <name>` 才显示更完整元数据。
 - KISS 不应要求用户把 `$KISS_HOME/skills` 注册给任何 agent。

@@ -204,7 +204,7 @@ kiss add https://example.com/skill.tar.gz --name skill-name
 
 `kiss run <skill> <args>` 只处理已安装 skill；如果 skill 不在本地数据库或安装目录中，返回错误并提示先执行 `kiss add ...`，不得自动下载。默认 `markdown` runner 中，`run` 的含义是加载、校验、封装并输出当前 skill 的上下文，而不是由 KISS 直接调用大模型或直接完成用户任务。它的输出应当适合 agent 消费，而不是把所有已安装 skill 都暴露给 agent。
 
-用户在 agent 中输入 `/kiss <skill> <args>` 时，推荐路径是由 `skills/kiss` KISS bridge skill 触发。它只做一件事：调用 `kiss run <skill> <args>`，把 stdout 作为当前轮上下文交给 agent。之后的推理、工具调用、脚本选择和文件修改都由外层 agent 按自己的权限模型完成。
+用户在 agent 中输入 `/kiss <skill> <args>` 时，推荐路径是由 `skills/kiss` KISS bridge skill 触发。它只做一件事：调用 `kiss run <skill> <args>`，把 stdout 作为当前轮上下文交给 agent。之后的推理、工具调用、脚本选择和文件修改都由外层 agent 按自己的权限模型完成。`/kiss kiss` 和 `$kiss kiss` 是递归调用 bridge skill 的无效请求，bridge skill 必须直接拒绝，不能调用 `kiss run kiss`。
 
 推荐输出结构：
 
