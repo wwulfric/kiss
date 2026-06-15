@@ -6,20 +6,35 @@ VERSION="${KISS_VERSION:-latest}"
 VERIFY_SIGNATURE="${KISS_VERIFY_SIGNATURE:-0}"
 FORCE_INSTALL="${KISS_FORCE_INSTALL:-0}"
 
-default_install_dir() {
-  if [ -n "${KISS_INSTALL_DIR:-}" ]; then
-    printf '%s\n' "$KISS_INSTALL_DIR"
-    return 0
-  fi
-  if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
-    printf '%s\n' "/usr/local/bin"
-    return 0
-  fi
+suggest_install_dir() {
   if [ -n "${HOME:-}" ]; then
     printf '%s\n' "$HOME/.local/bin"
     return 0
   fi
   printf '%s\n' "/usr/local/bin"
+}
+
+can_write_dir() {
+  dir=$1
+  [ -d "$dir" ] || return 1
+  test_file="$dir/.kiss-install-write-test.$$"
+  if ( : > "$test_file" ) 2>/dev/null; then
+    rm -f "$test_file"
+    return 0
+  fi
+  return 1
+}
+
+default_install_dir() {
+  if [ -n "${KISS_INSTALL_DIR:-}" ]; then
+    printf '%s\n' "$KISS_INSTALL_DIR"
+    return 0
+  fi
+  if can_write_dir /usr/local/bin; then
+    printf '%s\n' "/usr/local/bin"
+    return 0
+  fi
+  suggest_install_dir
 }
 
 path_contains() {
@@ -130,13 +145,13 @@ fi
 
 if ! mkdir -p "$INSTALL_DIR"; then
   echo "cannot create install directory: $INSTALL_DIR" >&2
-  echo "Set KISS_INSTALL_DIR to a writable directory, for example: $HOME/.local/bin" >&2
+  echo "Set KISS_INSTALL_DIR to a writable directory, for example: $(suggest_install_dir)" >&2
   exit 1
 fi
 
-if [ ! -w "$INSTALL_DIR" ]; then
+if ! can_write_dir "$INSTALL_DIR"; then
   echo "install directory is not writable: $INSTALL_DIR" >&2
-  echo "Set KISS_INSTALL_DIR to a writable directory, for example: $HOME/.local/bin" >&2
+  echo "Set KISS_INSTALL_DIR to a writable directory, for example: $(suggest_install_dir)" >&2
   exit 1
 fi
 
