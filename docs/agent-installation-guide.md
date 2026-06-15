@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/instal
 kiss --version
 ```
 
-如果没有 `/usr/local/bin` 写权限，改装到用户目录：
+如果没有 `/usr/local/bin` 写权限，安装脚本会默认改装到 `$HOME/.local/bin`。也可以显式指定用户目录：
 
 ```bash
 mkdir -p "$HOME/.local/bin"
@@ -66,7 +66,11 @@ curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/instal
 kiss --version
 ```
 
-如果 `kiss` 找不到，提示用户把安装目录加入 `PATH`。
+如果 `kiss` 找不到，提示用户把安装目录加入 `PATH`。例如：
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
 
 Windows PowerShell：
 

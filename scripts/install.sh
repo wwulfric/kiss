@@ -3,9 +3,33 @@ set -eu
 
 REPO="${KISS_REPO:-wwulfric/kiss}"
 VERSION="${KISS_VERSION:-latest}"
-INSTALL_DIR="${KISS_INSTALL_DIR:-/usr/local/bin}"
 VERIFY_SIGNATURE="${KISS_VERIFY_SIGNATURE:-0}"
 FORCE_INSTALL="${KISS_FORCE_INSTALL:-0}"
+
+default_install_dir() {
+  if [ -n "${KISS_INSTALL_DIR:-}" ]; then
+    printf '%s\n' "$KISS_INSTALL_DIR"
+    return 0
+  fi
+  if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
+    printf '%s\n' "/usr/local/bin"
+    return 0
+  fi
+  if [ -n "${HOME:-}" ]; then
+    printf '%s\n' "$HOME/.local/bin"
+    return 0
+  fi
+  printf '%s\n' "/usr/local/bin"
+}
+
+path_contains() {
+  case ":${PATH:-}:" in
+    *":$1:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+INSTALL_DIR=$(default_install_dir)
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 arch=$(uname -m)
@@ -104,6 +128,18 @@ if [ "$FORCE_INSTALL" != "1" ]; then
   fi
 fi
 
+if ! mkdir -p "$INSTALL_DIR"; then
+  echo "cannot create install directory: $INSTALL_DIR" >&2
+  echo "Set KISS_INSTALL_DIR to a writable directory, for example: $HOME/.local/bin" >&2
+  exit 1
+fi
+
+if [ ! -w "$INSTALL_DIR" ]; then
+  echo "install directory is not writable: $INSTALL_DIR" >&2
+  echo "Set KISS_INSTALL_DIR to a writable directory, for example: $HOME/.local/bin" >&2
+  exit 1
+fi
+
 curl -fsSLo "$tmp_dir/$archive" "$base_url/$archive"
 curl -fsSLo "$tmp_dir/checksums.txt" "$base_url/checksums.txt"
 
@@ -132,7 +168,9 @@ fi
 )
 
 tar -C "$tmp_dir" -xzf "$tmp_dir/$archive"
-mkdir -p "$INSTALL_DIR"
 install -m 0755 "$tmp_dir/kiss" "$INSTALL_DIR/kiss"
 
 echo "Installed kiss to $INSTALL_DIR/kiss"
+if ! path_contains "$INSTALL_DIR"; then
+  echo "Add $INSTALL_DIR to PATH to run kiss from a new shell."
+fi

@@ -26,6 +26,8 @@ macOS / Linux：
 curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.sh | bash
 ```
 
+如果 `/usr/local/bin` 不可写，安装脚本会默认安装到 `$HOME/.local/bin`。若安装后当前 shell 找不到 `kiss`，把该目录加入 `PATH`。
+
 Windows PowerShell：
 
 ```powershell
