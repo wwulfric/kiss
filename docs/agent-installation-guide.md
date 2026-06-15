@@ -14,7 +14,7 @@ KISS 有两类安装对象：
 1. 安装前先告诉用户会修改哪些位置，并获得明确确认。
 2. 如果 `kiss` 已存在，先运行 `kiss --version`；不要重复安装同版本。
 3. 如果需要安装 KISS CLI，先识别操作系统，再推荐对应命令。
-4. 如果需要安装 KISS bridge skill，优先使用 `npx skills add wwulfric/kiss`。
+4. 如果需要安装 KISS bridge skill，使用 `npx skills add wwulfric/kiss --skill kiss`。
 5. 不要枚举、读取、同步或总结 `$KISS_HOME/skills` 里的 skill。
 6. 不要在用户输入 `/kiss <skill>` 时自动执行 `kiss add`；缺失 skill 时提示用户显式安装。
 7. 不要替 KISS 配置任何模型 provider、API key 或 standalone executor。
@@ -54,7 +54,7 @@ kiss doctor
 macOS / Linux：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.sh | bash
 kiss --version
 ```
 
@@ -62,7 +62,7 @@ kiss --version
 
 ```bash
 mkdir -p "$HOME/.local/bin"
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.sh | env KISS_INSTALL_DIR="$HOME/.local/bin" bash
+curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.sh | env KISS_INSTALL_DIR="$HOME/.local/bin" bash
 kiss --version
 ```
 
@@ -71,7 +71,7 @@ kiss --version
 Windows PowerShell：
 
 ```powershell
-irm https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.ps1 | iex
 kiss --version
 ```
 
@@ -82,29 +82,25 @@ kiss --version
 macOS / Linux：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.sh | env KISS_VERSION=v0.0.1 bash
+curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.sh | env KISS_VERSION=v0.0.1 bash
 ```
 
 Windows PowerShell：
 
 ```powershell
 $env:KISS_VERSION = "v0.0.1"
-irm https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.ps1 | iex
 ```
 
 ### 3. 安装 KISS bridge skill
 
-优先使用 Vercel Skills / skills.sh 兼容 CLI：
-
-```bash
-npx skills add wwulfric/kiss
-```
-
-如果安装工具要求显式选择 skill，使用：
+优先使用 Vercel Skills / skills.sh 兼容 CLI，并显式指定只安装 `kiss`：
 
 ```bash
 npx skills add wwulfric/kiss --skill kiss
 ```
+
+不要省略 `--skill kiss`。本仓库还包含项目私有的 `release` skill，省略 `--skill kiss` 时部分安装工具会进入交互选择，甚至安装全部 skill。
 
 如果没有 `npx`，不要自动安装 Node.js；先询问用户是否允许安装 Node.js，或者使用下面的手动安装方式。
 
@@ -114,7 +110,7 @@ npx skills add wwulfric/kiss --skill kiss
 
 ```bash
 mkdir -p "$HOME/.agents/skills/kiss"
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/skills/kiss/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/skills/kiss/SKILL.md \
   -o "$HOME/.agents/skills/kiss/SKILL.md"
 ```
 
@@ -122,7 +118,7 @@ curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/skills/kiss/SKIL
 
 ```bash
 mkdir -p ".agents/skills/kiss"
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/skills/kiss/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/skills/kiss/SKILL.md \
   -o ".agents/skills/kiss/SKILL.md"
 ```
 
@@ -132,7 +128,7 @@ curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/skills/kiss/SKIL
 
 ```bash
 mkdir -p "$HOME/.claude/skills/kiss"
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/skills/kiss/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/skills/kiss/SKILL.md \
   -o "$HOME/.claude/skills/kiss/SKILL.md"
 ```
 
@@ -140,7 +136,7 @@ curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/skills/kiss/SKIL
 
 ```bash
 mkdir -p ".claude/skills/kiss"
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/skills/kiss/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/skills/kiss/SKILL.md \
   -o ".claude/skills/kiss/SKILL.md"
 ```
 
@@ -208,7 +204,7 @@ $kiss <已安装的-skill> <参数>
 - macOS / Linux 用户目录安装时，确认 `$HOME/.local/bin` 在 `PATH` 中。
 - Windows 安装后需要打开新的 PowerShell 窗口刷新 `PATH`。
 
-### `npx skills add wwulfric/kiss` 失败
+### `npx skills add wwulfric/kiss --skill kiss` 失败
 
 - 检查是否安装 Node.js / npm。
 - 如果用户不想安装 Node.js，使用对应 agent 的手动安装方式。
@@ -227,14 +223,14 @@ $kiss <已安装的-skill> <参数>
 这是预期行为。默认不重复下载、不降级。如果用户明确要求覆盖安装，macOS / Linux 可使用：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.sh | env KISS_FORCE_INSTALL=1 bash
+curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.sh | env KISS_FORCE_INSTALL=1 bash
 ```
 
 Windows PowerShell 可使用：
 
 ```powershell
 $env:KISS_FORCE_INSTALL = "1"
-irm https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.ps1 | iex
 ```
 
 ## 给用户的完成回报
@@ -242,7 +238,7 @@ irm https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.ps1 | i
 安装完成后，向用户说明：
 
 - KISS CLI 版本：`kiss --version` 的输出。
-- KISS bridge skill 的安装方式：`npx skills add` 或手动路径。
+- KISS bridge skill 的安装方式：`npx skills add wwulfric/kiss --skill kiss` 或手动路径。
 - 如果执行了端到端验证，说明 `find-skills` 已安装到 KISS 专属目录，并汇报 `kiss run find-skills ...` 的结果。
 - 是否需要重启 agent 会话或打开新终端。
 - 哪些检查被跳过，以及跳过原因。

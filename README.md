@@ -23,13 +23,13 @@ KISS 非常适合如下场景：
 macOS / Linux：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.sh | bash
 ```
 
 Windows PowerShell：
 
 ```powershell
-irm https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.ps1 | iex
 ```
 
 ### 安装 Skill
@@ -37,7 +37,7 @@ irm https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.ps1 | i
 先把 KISS bridge skill 安装到 agent 的全局或项目 skill 目录：
 
 ```bash
-npx skills add wwulfric/kiss
+npx skills add wwulfric/kiss --skill kiss
 ```
 
 如果要让 Codex、Claude Code 等 agent 代为安装，可把 [`docs/agent-installation-guide.md`](docs/agent-installation-guide.md) 交给它执行。

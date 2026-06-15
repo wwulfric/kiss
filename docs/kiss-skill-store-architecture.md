@@ -48,7 +48,7 @@ Agent receives only selected skill context
 Agent performs the requested work with its own model and tools
 ```
 
-KISS 不负责替代 coding agent，也不负责把 KISS 管理的 skill 同步到 Claude、Codex、Cursor、Gemini 等工具的全局目录。安装和加载是两个显式动作：`kiss add` 负责保存 skill 与元数据，`kiss run` 只负责加载已安装且被点名的 skill，并把结果交给外层 agent 消费。仓库内 `skills/kiss/SKILL.md` 只是 KISS bridge skill，用于被 `npx skills add wwulfric/kiss` 安装到 agent 原生 skill 系统；脚本化场景可用 `--skill kiss` 显式指定。它不包含 KISS store 中的任何用户 skill。KISS 本身不进入 LLM 推理循环。
+KISS 不负责替代 coding agent，也不负责把 KISS 管理的 skill 同步到 Claude、Codex、Cursor、Gemini 等工具的全局目录。安装和加载是两个显式动作：`kiss add` 负责保存 skill 与元数据，`kiss run` 只负责加载已安装且被点名的 skill，并把结果交给外层 agent 消费。仓库内 `skills/kiss/SKILL.md` 只是 KISS bridge skill，用于被 `npx skills add wwulfric/kiss --skill kiss` 安装到 agent 原生 skill 系统；安装命令必须显式指定 `--skill kiss`，避免把项目私有 skill 一起安装。它不包含 KISS store 中的任何用户 skill。KISS 本身不进入 LLM 推理循环。
 
 ## 3. 本地目录布局
 
@@ -400,7 +400,7 @@ kiss update browser-test
 
 在 CLI 稳定后，提供 `skills/kiss` KISS bridge skill：
 
-- KISS bridge skill：仓库内提供 `skills/kiss/SKILL.md`，使 `npx skills add wwulfric/kiss` 可以安装桥接说明；脚本化场景可用 `--skill kiss` 显式指定。当用户显式输入 `/kiss <skill> [args...]` 时，agent 调用 `kiss run` 并把 stdout 当作当前轮上下文。
+- KISS bridge skill：仓库内提供 `skills/kiss/SKILL.md`，通过 `npx skills add wwulfric/kiss --skill kiss` 安装桥接说明；安装命令必须显式指定 `--skill kiss`。当用户显式输入 `/kiss <skill> [args...]` 时，agent 调用 `kiss run` 并把 stdout 当作当前轮上下文。
 
 #### M5：移除本地执行器
 

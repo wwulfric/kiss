@@ -109,7 +109,7 @@ kiss doctor
 | FR-5 | KISS 只向 agent 暴露当前被调用 skill 的内容 | P0 |
 | FR-6 | 用户可以 list、update、remove、doctor | P1 |
 | FR-7 | 用户可以查看 skill 来源、版本、sha256、安装路径和安装时间 | P1 |
-| FR-8 | 用户可以通过 `npx skills add wwulfric/kiss` 安装 KISS bridge skill，让 agent 把显式 `/kiss` 请求转成 `kiss run`；`--skill kiss` 可作为显式指定写法 | P1 |
+| FR-8 | 用户可以通过 `npx skills add wwulfric/kiss --skill kiss` 安装 KISS bridge skill，让 agent 把显式 `/kiss` 请求转成 `kiss run`；不得省略 `--skill kiss`，避免安装项目私有 skill | P1 |
 | FR-9 | KISS bridge skill 必须拒绝 `/kiss kiss` 和 `$kiss kiss`，避免递归调用自身 | P0 |
 | NFR-1 | 默认安装形态不要求普通用户预装 Node、Bun 或 TypeScript 运行时 | P0 |
 | NFR-2 | 本地必须保存 skill 元数据数据库，供 `list/show/update` 查询，不依赖 agent 扫描 skill 内容 | P0 |
@@ -171,5 +171,5 @@ kiss doctor
 
 ### Phase 3：Bridge skill 与 context handoff
 
-- 仓库内 `skills/kiss` KISS bridge skill，支持 `npx skills add wwulfric/kiss`；脚本化场景可用 `--skill kiss` 显式指定。
+- 仓库内 `skills/kiss` KISS bridge skill，支持 `npx skills add wwulfric/kiss --skill kiss`；安装文档必须显式指定 `--skill kiss`。
 - 明确 context handoff 协议：KISS 输出当前 skill 信息，agent 做后续工作。

@@ -38,13 +38,13 @@ Rules:
 - For macOS or Linux, recommend:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.sh | bash
 ```
 
 - For Windows PowerShell, recommend:
 
 ```powershell
-irm https://raw.githubusercontent.com/wwulfric/kiss/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.ps1 | iex
 ```
 
 - If the OS cannot be detected, ask the user whether they are on macOS, Linux, or Windows before recommending an installation command.
