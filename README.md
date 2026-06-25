@@ -6,7 +6,7 @@ KISS（Keep It Stupid Simple）是一个面向 coding agent 的显式 skill stor
 
 - **显式**：只在用户输入 `/kiss <skill>`、`$kiss <skill>` 或 `kiss run <skill>` 时加载。
 - **隔离**：KISS 管理的 skill 存在 `$KISS_HOME/skills`，不写入 agent 全局 skill 目录或当前项目目录。
-- **可审计**：本地保存来源、版本、resolved commit、sha256 和安装时间。
+- **可审计**：本地保存来源、`skillFolderHash` 版本、resolved commit、sha256 和安装时间。
 - **不自动拉取**：`run` 不下载、不安装、不更新；缺失时提示先 `kiss add`。
 - **不接管执行**：不调用模型 provider，不执行 skill 脚本；后续工作由外层 agent 完成。
 
@@ -36,10 +36,12 @@ irm https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.ps1 |
 
 ### 安装 Skill
 
-先把 KISS bridge skill 安装到 agent 的全局或项目 skill 目录：
+先让 agent 能识别 `/kiss`：
 
 ```bash
-npx skills add wwulfric/kiss --skill kiss
+kiss setup
+# 或 Claude Code
+kiss setup --agent claude
 ```
 
 如果要让 Codex、Claude Code 等 agent 代为安装，可把 [`docs/agent-installation-guide.md`](docs/agent-installation-guide.md) 交给它执行。
@@ -76,16 +78,29 @@ kiss add file:///abs/path/to/skill --name browser-test
 安装 GitHub 仓库里的 skill：
 
 ```bash
+# 安装仓库根目录里的单个 skill；本地名默认用 repo 名
 kiss add owner/repo
+
+# 指定 Git ref；@v1.0.0 可以是 tag、branch 或 commit
+kiss add github.com/owner/repo@v1.0.0
+
+# 从多 skill 仓库中选择 skills/frontend-design
 kiss add vercel-labs/agent-skills --skill frontend-design
-kiss add github:owner/repo/skills/browser-test#v0.1.0 --name browser-test
+
+# 指定 Git ref，同时选择仓库里的 browser-test skill
+kiss add github:owner/repo@main --skill browser-test
+
+# 已有同名但确认要覆盖时使用 --force
+kiss add github:owner/repo --skill browser-test --force
 ```
 
-安装 HTTPS tarball：
+从 Vercel Skills CLI 的全局安装记录导入当前快照：
 
 ```bash
-kiss add https://example.com/browser-test.tar.gz --name browser-test
+kiss import --skill find-skills
+kiss import --all --dry-run
 ```
+
 
 查看、更新和删除：
 
@@ -93,12 +108,11 @@ kiss add https://example.com/browser-test.tar.gz --name browser-test
 kiss list
 kiss show browser-test
 kiss update browser-test
+kiss update browser-test@master
 kiss update browser-test --yes
 kiss remove browser-test
 kiss doctor
 ```
-
-`kiss update <name>` 默认只预览版本、来源和入口文件 diff；加 `--yes` 才会真正更新。`kiss run` 不会自动安装、自动更新或访问远端。
 
 ## 本地开发
 

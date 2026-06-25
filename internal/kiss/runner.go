@@ -23,11 +23,11 @@ func RunSkill(paths Paths, name string, args []string, out io.Writer) error {
 		return fmt.Errorf("skill %q is not installed; run kiss add <source> --name %s first", name, name)
 	}
 	skillDir := paths.SkillDir(name)
-	manifest, err := LoadManifest(skillDir)
+	descriptor, err := LoadSkillDescriptor(skillDir)
 	if err != nil {
 		return err
 	}
-	entryPath := filepath.Join(skillDir, manifest.Entry)
+	entryPath := filepath.Join(skillDir, descriptor.Entry)
 	content, err := os.ReadFile(entryPath)
 	if err != nil {
 		return err
@@ -42,11 +42,8 @@ func RunSkill(paths Paths, name string, args []string, out io.Writer) error {
 	writer.printf("- Args: %s\n\n", formatArgs(args))
 	writer.println("## Skill metadata")
 	writer.println()
-	writer.printf("- Manifest name: %s\n", manifest.Name)
-	writer.printf("- Version: %s\n", manifest.Version)
-	if manifest.Description != "" {
-		writer.printf("- Description: %s\n", manifest.Description)
-	}
+	writer.printf("- Skill name: %s\n", descriptor.Name)
+	writer.printf("- Version: %s\n", descriptor.Version)
 	writer.println()
 	writer.println("## Skill instructions")
 	writer.println()

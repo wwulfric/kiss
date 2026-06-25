@@ -12,14 +12,10 @@ import (
 	"testing"
 )
 
-func makeSkill(t *testing.T, name, version, instructions string) string {
+func makeSkill(t *testing.T, name, _ string, instructions string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	manifest := "name = \"" + name + "\"\nversion = \"" + version + "\"\ndescription = \"test skill\"\nentry = \"SKILL.md\"\n\n[runner]\ntype = \"markdown\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "kiss.skill.toml"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(instructions+"\n"), 0o644); err != nil {
@@ -58,6 +54,62 @@ func withGitHubTestServer(t *testing.T, sha string, archive []byte, archivePath 
 	}
 }
 
+type githubRefArchive struct {
+	sha     string
+	archive []byte
+}
+
+func withGitHubArchiveByRefTestServer(t *testing.T, refs map[string]githubRefArchive, archivePath *string) func() {
+	t.Helper()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/repos/"):
+			ref := pathBase(r.URL.Path)
+			entry, ok := refs[ref]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"sha":"` + entry.sha + `"}`))
+		case strings.Contains(r.URL.Path, "/tar.gz/"):
+			if archivePath != nil {
+				*archivePath = r.URL.Path
+			}
+			sha := pathBase(r.URL.Path)
+			for _, entry := range refs {
+				if entry.sha == sha {
+					_, _ = w.Write(entry.archive)
+					return
+				}
+			}
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	oldTransport := remoteHTTPTransport
+	oldAPIBase := githubAPIBaseURL
+	oldCodeloadBase := githubCodeloadBaseURL
+	remoteHTTPTransport = server.Client().Transport
+	githubAPIBaseURL = server.URL
+	githubCodeloadBaseURL = server.URL
+	return func() {
+		remoteHTTPTransport = oldTransport
+		githubAPIBaseURL = oldAPIBase
+		githubCodeloadBaseURL = oldCodeloadBase
+		server.Close()
+	}
+}
+
+func pathBase(path string) string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[len(parts)-1]
+}
+
 type roundTripFunc func(req *http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -83,7 +135,7 @@ func (f *failingReadCloser) Close() error {
 	return nil
 }
 
-func makeSkillArchive(t *testing.T, root, name, version, instructions string) []byte {
+func makeSkillArchive(t *testing.T, root, name, _ string, instructions string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -104,8 +156,6 @@ func makeSkillArchive(t *testing.T, root, name, version, instructions string) []
 		}
 	}
 	addDir(root + "/")
-	manifest := "name = \"" + name + "\"\nversion = \"" + version + "\"\ndescription = \"remote skill\"\nentry = \"SKILL.md\"\n\n[runner]\ntype = \"markdown\"\n"
-	addFile(root+"/kiss.skill.toml", manifest)
 	addFile(root+"/SKILL.md", instructions+"\n")
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
@@ -116,7 +166,7 @@ func makeSkillArchive(t *testing.T, root, name, version, instructions string) []
 	return buf.Bytes()
 }
 
-func makeNestedSkillArchive(t *testing.T, root, subdir, name, version, instructions string) []byte {
+func makeNestedSkillArchive(t *testing.T, root, subdir, name, _ string, instructions string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -142,8 +192,6 @@ func makeNestedSkillArchive(t *testing.T, root, subdir, name, version, instructi
 		current += "/" + segment
 		addDir(current + "/")
 	}
-	manifest := "name = \"" + name + "\"\nversion = \"" + version + "\"\ndescription = \"github skill\"\nentry = \"SKILL.md\"\n\n[runner]\ntype = \"markdown\"\n"
-	addFile(current+"/kiss.skill.toml", manifest)
 	addFile(current+"/SKILL.md", instructions+"\n")
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)

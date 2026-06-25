@@ -18,7 +18,7 @@ func ValidateSkillName(name string) error {
 }
 
 func validateSafeRelativePath(path string) error {
-	// Manifest 和 archive 内部路径必须保持相对，避免写出 skill 目录边界。
+	// Skill 入口和 archive 内部路径必须保持相对，避免写出 skill 目录边界。
 	if path == "" {
 		return fmt.Errorf("path must be a safe relative path")
 	}

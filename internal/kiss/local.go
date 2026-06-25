@@ -10,28 +10,42 @@ import (
 
 // AddLocalSkill 从本地目录或 file:// URL 安装 skill。
 func AddLocalSkill(paths Paths, sourcePath, name string) error {
+	return AddLocalSkillWithOptions(paths, sourcePath, name, AddOptions{})
+}
+
+// AddLocalSkillWithOptions 从本地 source 安装 skill，并按 options 处理同名异源替换。
+func AddLocalSkillWithOptions(paths Paths, sourcePath, name string, options AddOptions) error {
+	if err := ValidateSkillName(name); err != nil {
+		return err
+	}
 	absSource, err := NormalizeLocalSourcePath(sourcePath)
 	if err != nil {
 		return err
 	}
 	source := SourceMetadata{Kind: "local", URI: absSource}
+	if err := paths.EnsureBase(); err != nil {
+		return err
+	}
+	if err := ensureAddSourceAllowed(paths, name, source, options.Force); err != nil {
+		return err
+	}
 	return installSkillFromDir(paths, absSource, name, "local:"+absSource, source)
 }
 
-// InferLocalSkillName 读取本地 source manifest 并返回声明的 skill name。
+// InferLocalSkillName 根据本地 source 的 SKILL.md 入口推断 skill name。
 func InferLocalSkillName(sourcePath string) (string, error) {
 	absSource, err := NormalizeLocalSourcePath(sourcePath)
 	if err != nil {
 		return "", err
 	}
-	manifest, err := LoadManifest(absSource)
+	descriptor, err := LoadSkillDescriptor(absSource)
 	if err != nil {
 		return "", err
 	}
-	if err := ValidateSkillName(manifest.Name); err != nil {
+	if err := ValidateSkillName(descriptor.Name); err != nil {
 		return "", err
 	}
-	return manifest.Name, nil
+	return descriptor.Name, nil
 }
 
 // NormalizeLocalSourcePath 把本地路径和支持的 file:// URL 转成绝对路径。

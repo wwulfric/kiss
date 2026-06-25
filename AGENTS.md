@@ -2,17 +2,17 @@
 
 本仓库用于设计和实现 KISS（Keep It Stupid Simple）skill store。
 
-## 目标
+## 项目文档
 
-- KISS 管理的 skill 必须存放在 KISS 专属目录中，不写入 coding agent 的全局 skill 目录，也不写入当前项目目录。
-- coding agent 不应在会话启动时枚举、读取或总结 KISS 管理的 skill。
-- 只有当用户显式调用 `/kiss <skill_name> ...`、`$kiss <skill_name> ...` 或等价 CLI 命令时，才加载并执行已安装的对应 skill；`run` 不得自动下载或安装 skill。
-- 优先保持实现简单、可审计、可删除；避免后台同步、自动全局注入和复杂的多 agent 适配层。
+- 产品定位、目标、非目标和用户场景见 `docs/kiss-skill-store-prd.md`。
+- 架构边界、组件职责和关键约束见 `docs/kiss-skill-store-architecture.md`。
+- 具体安装指导见 `docs/agent-installation-guide.md`。
 
 ## 工作约定
 
 - 文档与注释优先使用中文；命令、配置键和协议字段保持英文。
 - 新增产品决策时，优先更新 `docs/kiss-skill-store-prd.md`；新增技术架构决策时，优先更新 `docs/kiss-skill-store-architecture.md`。
+- 不要在 `AGENTS.md` 重复产品目标或架构设计；需要时引用上述项目文档。
 - 不要把示例 skill、缓存 skill 或下载后的第三方 skill 提交到本仓库；如需示例，请使用不可执行的文档片段。
 - 不要在 import 外层添加 try/catch。
 
@@ -28,25 +28,33 @@ CLI 入口
 核心包 internal/kiss
   基础模型与存储
     types.go
-      Manifest、InstallRecord、Version 等核心类型和版本变量。
+      SkillDescriptor、InstallRecord、Version 等核心类型和版本变量。
     paths.go
       KISS_HOME、store/cache/logs 路径解析和基础目录初始化。
     metadata.go
       skills.db.json 的读写、查询、更新和 schema version 校验。
-    manifest.go
-      kiss.skill.toml / SKILL.md manifest 加载；只支持 runner.type = "markdown"。
+    skill_descriptor.go
+      只加载根目录 SKILL.md；不读取 kiss.skill.toml。
+    folder_hash.go
+      计算 skillFolderHash，并作为 KISS 的 skill 版本信息。
     validation.go
       skill name 校验和安全相对路径校验。
     write.go
       内部 writer error 聚合 helper，用于多行 CLI 输出。
+    setup.go
+      `kiss setup` 的 agent skill 安装逻辑；当前支持用户目录下的默认 .agents 和 Claude .claude 目录。
 
   安装与 source 处理（add/update 共用）
     local.go
       本地目录和 file:// source 解析，并调用通用安装核心。
     remote.go
-      GitHub / HTTPS tarball source 解析、ref 到 commit 解析、下载、sha256 记录和安全解包。
+      GitHub source 解析、ref 到 commit 解析、下载、sha256 记录和安全解包。
+    import_skills.go
+      从 Vercel Skills CLI 全局 lock 和 canonical copy 导入当前快照；优先还原真实来源，失败时保留导入快照来源。
     install.go
       已解析 skill 目录的通用安装核心、安全复制、.kiss-install.json 写入和元数据生成。
+    source_identity.go
+      add/update/import 共用的来源身份比较；同源刷新不需要 --force，异源替换需要 --force。
 
   运行
     runner.go
@@ -65,8 +73,11 @@ CLI 入口
   测试
     install_test.go
     remote_test.go
+    import_skills_test.go
     update_test.go
-    manifest_test.go
+    skill_descriptor_test.go
+    folder_hash_test.go
+    setup_test.go
     runner_test.go
     diff_test.go
     management_test.go
@@ -81,7 +92,7 @@ KISS bridge skill
   docs/kiss-skill-store-prd.md
     KISS 的产品定位、目标、非目标、用户故事和路线图。
   docs/kiss-skill-store-architecture.md
-    KISS 的架构边界、目录布局、add/run 协议和实现约束。
+    KISS 的系统边界、组件职责和关键架构约束。
   docs/agent-installation-guide.md
     给 Codex、Claude Code 等 agent 使用的 KISS CLI 与 bridge skill 安装指导。
 

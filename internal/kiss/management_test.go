@@ -27,7 +27,11 @@ func TestAddRunListRemoveLocalSkill(t *testing.T) {
 	if err := ListSkills(paths, &listOut); err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if !strings.Contains(listOut.String(), "browser-test\t0.1.0\tlocal\tlocal:") {
+	metadata, ok, err := GetSkillMetadata(paths, "browser-test")
+	if err != nil || !ok {
+		t.Fatalf("metadata missing ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(listOut.String(), "browser-test\t"+metadata.Version+"\tlocal\tlocal:") {
 		t.Fatalf("list output missing browser-test: %q", listOut.String())
 	}
 

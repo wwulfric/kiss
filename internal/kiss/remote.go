@@ -20,6 +20,9 @@ var remoteHTTPTransport http.RoundTripper = http.DefaultTransport
 var githubAPIBaseURL = "https://api.github.com"
 var githubCodeloadBaseURL = "https://codeload.github.com"
 
+var githubAPITimeout = 30 * time.Second
+var archiveDownloadTimeout = 5 * time.Minute
+
 var maxRemoteArchiveBytes int64 = 100 << 20    // 100 MiB
 var maxExtractedArchiveBytes int64 = 200 << 20 // 200 MiB
 var maxGitHubAPIResponseBytes int64 = 1 << 20  // 1 MiB
@@ -33,7 +36,7 @@ type ResolvedSource struct {
 	FullName string
 }
 
-// GitHubSource 是 github:owner/repo[/path]#ref 的解析结果。
+// GitHubSource 是 github:owner/repo[/path][@ref] 的解析结果。
 type GitHubSource struct {
 	Owner string
 	Repo  string
@@ -41,8 +44,13 @@ type GitHubSource struct {
 	Ref   string
 }
 
-// AddRemoteSkill 从 GitHub source 或 HTTPS tarball 安装 skill。
+// AddRemoteSkill 从 GitHub source 安装 skill。
 func AddRemoteSkill(paths Paths, sourceSpec, name string) error {
+	return AddRemoteSkillWithOptions(paths, sourceSpec, name, AddOptions{})
+}
+
+// AddRemoteSkillWithOptions 从远程 source 安装 skill，并按 options 处理同名异源替换。
+func AddRemoteSkillWithOptions(paths Paths, sourceSpec, name string, options AddOptions) error {
 	if err := ValidateSkillName(name); err != nil {
 		return err
 	}
@@ -51,6 +59,15 @@ func AddRemoteSkill(paths Paths, sourceSpec, name string) error {
 		return err
 	}
 	if err := paths.EnsureBase(); err != nil {
+		return err
+	}
+	resolvedSource := SourceMetadata{
+		Kind:     resolved.Kind,
+		URI:      resolved.URI,
+		Ref:      resolved.Ref,
+		Resolved: resolved.Resolved,
+	}
+	if err := ensureAddSourceAllowed(paths, name, resolvedSource, options.Force); err != nil {
 		return err
 	}
 	archivePath, sum, err := downloadArchive(paths, downloadURL, name)
@@ -83,13 +100,7 @@ func AddRemoteSkill(paths Paths, sourceSpec, name string) error {
 		}
 		skillDir = found
 	}
-	resolvedSource := SourceMetadata{
-		Kind:     resolved.Kind,
-		URI:      resolved.URI,
-		Ref:      resolved.Ref,
-		Resolved: resolved.Resolved,
-		SHA256:   sum,
-	}
+	resolvedSource.SHA256 = sum
 	return installSkillFromDir(paths, skillDir, name, resolved.FullName, resolvedSource)
 }
 
@@ -100,7 +111,7 @@ func ResolveRemoteSource(sourceSpec string) (ResolvedSource, string, string, err
 		if err != nil {
 			return ResolvedSource{}, "", "", err
 		}
-		resolvedCommit, err := ResolveGitHubCommit(gh)
+		resolvedCommit, resolvedRef, err := ResolveGitHubCommit(gh)
 		if err != nil {
 			return ResolvedSource{}, "", "", err
 		}
@@ -113,30 +124,31 @@ func ResolveRemoteSource(sourceSpec string) (ResolvedSource, string, string, err
 		if gh.Path != "" {
 			uri += "/" + gh.Path
 		}
-		return ResolvedSource{Kind: "github", URI: uri, Ref: gh.Ref, Resolved: resolvedCommit, FullName: fullName}, archiveURL, gh.Path, nil
-	}
-	if strings.HasPrefix(sourceSpec, "https://") {
-		if _, err := url.ParseRequestURI(sourceSpec); err != nil {
-			return ResolvedSource{}, "", "", err
-		}
-		return ResolvedSource{Kind: "https", URI: sourceSpec, FullName: sourceSpec}, sourceSpec, "", nil
+		return ResolvedSource{Kind: "github", URI: uri, Ref: resolvedRef, Resolved: resolvedCommit, FullName: fullName}, archiveURL, gh.Path, nil
 	}
 	return ResolvedSource{}, "", "", fmt.Errorf("unsupported remote source %q", sourceSpec)
 }
 
 // ResolveGitHubCommit 把 GitHub ref 解析成 commit SHA，用于记录可复现的 metadata。
-func ResolveGitHubCommit(source GitHubSource) (string, error) {
-	commitURL := fmt.Sprintf("%s/repos/%s/%s/commits/%s", strings.TrimRight(githubAPIBaseURL, "/"), source.Owner, source.Repo, url.PathEscape(source.Ref))
-	client := &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: remoteHTTPTransport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if req.URL.Scheme != "https" {
-				return fmt.Errorf("redirect to non-https URL is not allowed: %s", req.URL.String())
-			}
-			return nil
-		},
+func ResolveGitHubCommit(source GitHubSource) (string, string, error) {
+	if source.Ref != "" {
+		sha, err := resolveGitHubCommitRef(source, source.Ref)
+		return sha, source.Ref, err
 	}
+	var lastErr error
+	for _, ref := range []string{"main", "master"} {
+		sha, err := resolveGitHubCommitRef(source, ref)
+		if err == nil {
+			return sha, ref, nil
+		}
+		lastErr = err
+	}
+	return "", "", fmt.Errorf("resolve GitHub commit failed for default refs main/master: %w", lastErr)
+}
+
+func resolveGitHubCommitRef(source GitHubSource, ref string) (string, error) {
+	commitURL := fmt.Sprintf("%s/repos/%s/%s/commits/%s", strings.TrimRight(githubAPIBaseURL, "/"), source.Owner, source.Repo, url.PathEscape(ref))
+	client := remoteHTTPClient(configuredRemoteTimeout("KISS_HTTP_TIMEOUT", githubAPITimeout))
 	req, err := http.NewRequest(http.MethodGet, commitURL, nil)
 	if err != nil {
 		return "", err
@@ -170,19 +182,22 @@ func ResolveGitHubCommit(source GitHubSource) (string, error) {
 	return body.SHA, nil
 }
 
-// ParseGitHubSource 解析 github:owner/repo[/path]#ref 语法。
+// ParseGitHubSource 解析 github:owner/repo[/path][@ref] 语法，并兼容旧的 #ref。
 func ParseGitHubSource(sourceSpec string) (GitHubSource, error) {
 	spec := strings.TrimPrefix(sourceSpec, "github:")
-	ref := "main"
+	ref := ""
 	if before, after, ok := strings.Cut(spec, "#"); ok {
 		spec = before
 		if after != "" {
 			ref = after
 		}
+	} else if before, after, ok := splitGitRefSuffix(spec); ok {
+		spec = before
+		ref = after
 	}
 	parts := strings.Split(spec, "/")
 	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		return GitHubSource{}, fmt.Errorf("github source must be github:owner/repo[/path]#ref")
+		return GitHubSource{}, fmt.Errorf("github source must be github:owner/repo[/path][@ref]")
 	}
 	path := ""
 	if len(parts) > 2 {
@@ -194,17 +209,16 @@ func ParseGitHubSource(sourceSpec string) (GitHubSource, error) {
 	return GitHubSource{Owner: parts[0], Repo: parts[1], Path: path, Ref: ref}, nil
 }
 
-func downloadArchive(paths Paths, downloadURL, name string) (string, string, error) {
-	client := &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: remoteHTTPTransport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if req.URL.Scheme != "https" {
-				return fmt.Errorf("redirect to non-https URL is not allowed: %s", req.URL.String())
-			}
-			return nil
-		},
+func splitGitRefSuffix(spec string) (string, string, bool) {
+	at := strings.LastIndex(spec, "@")
+	if at <= 0 || at == len(spec)-1 {
+		return spec, "", false
 	}
+	return spec[:at], spec[at+1:], true
+}
+
+func downloadArchive(paths Paths, downloadURL, name string) (string, string, error) {
+	client := remoteHTTPClient(configuredRemoteTimeout("KISS_DOWNLOAD_TIMEOUT", archiveDownloadTimeout))
 	resp, err := client.Get(downloadURL)
 	if err != nil {
 		return "", "", err
@@ -237,6 +251,31 @@ func downloadArchive(paths Paths, downloadURL, name string) (string, string, err
 		return "", "", err
 	}
 	return file.Name(), hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func remoteHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: remoteHTTPTransport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect to non-https URL is not allowed: %s", req.URL.String())
+			}
+			return nil
+		},
+	}
+}
+
+func configuredRemoteTimeout(envName string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(envName))
+	if value == "" {
+		return fallback
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout <= 0 {
+		return fallback
+	}
+	return timeout
 }
 
 func extractTarGz(archivePath, dest string) error {

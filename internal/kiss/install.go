@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+// AddOptions 控制显式 add 命令的替换行为。
+type AddOptions struct {
+	Force bool
+}
+
 func installSkillFromDir(paths Paths, sourcePath, name, fullName string, source SourceMetadata) error {
 	if err := ValidateSkillName(name); err != nil {
 		return err
@@ -28,7 +33,7 @@ func installSkillFromDir(paths Paths, sourcePath, name, fullName string, source 
 	if err := paths.EnsureBase(); err != nil {
 		return err
 	}
-	manifest, err := LoadManifest(absSource)
+	descriptor, err := LoadSkillDescriptor(absSource)
 	if err != nil {
 		return err
 	}
@@ -46,16 +51,23 @@ func installSkillFromDir(paths Paths, sourcePath, name, fullName string, source 
 	if err := copySkillDir(absSource, tmpDir); err != nil {
 		return err
 	}
-	installedAt := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(time.RFC3339)
+	installedAt := now
+	if existing, ok, err := GetSkillMetadata(paths, name); err != nil {
+		return err
+	} else if ok && sameSourcePackageIdentity(existing.Source, source) && existing.InstalledAt != "" {
+		installedAt = existing.InstalledAt
+	}
 	record := InstallRecord{
-		Name:        name,
-		Source:      source.URI,
-		Kind:        source.Kind,
-		Ref:         source.Ref,
-		Resolved:    source.Resolved,
-		SHA256:      source.SHA256,
-		InstalledAt: installedAt,
-		KissVersion: Version,
+		Name:            name,
+		Source:          source.URI,
+		Kind:            source.Kind,
+		Ref:             source.Ref,
+		Resolved:        source.Resolved,
+		SHA256:          source.SHA256,
+		SkillFolderHash: descriptor.Version,
+		InstalledAt:     installedAt,
+		KissVersion:     Version,
 	}
 	if err := writeInstallRecord(tmpDir, record); err != nil {
 		return err
@@ -77,19 +89,13 @@ func installSkillFromDir(paths Paths, sourcePath, name, fullName string, source 
 		return err
 	}
 	metadata := SkillMetadata{
-		Name:         name,
-		FullName:     fullName,
-		ManifestName: manifest.Name,
-		Version:      manifest.Version,
-		Description:  manifest.Description,
-		Source:       source,
-		Runner: RunnerMetadata{
-			Type:  manifest.RunnerType,
-			Entry: manifest.Entry,
-		},
+		Name:          name,
+		FullName:      fullName,
+		Version:       descriptor.Version,
+		Source:        source,
 		InstalledPath: dest,
 		InstalledAt:   installedAt,
-		UpdatedAt:     installedAt,
+		UpdatedAt:     now,
 		KissVersion:   Version,
 	}
 	if err := UpsertSkillMetadata(paths, metadata); err != nil {
@@ -122,6 +128,12 @@ func copySkillDir(src, dst string) error {
 		}
 		if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || filepath.IsAbs(clean) {
 			return fmt.Errorf("unsafe path in skill package: %s", rel)
+		}
+		if shouldSkipSkillPackageEntry(clean, entry.IsDir()) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		target := filepath.Join(dst, clean)
 		info, err := entry.Info()
@@ -165,5 +177,5 @@ func writeInstallRecord(skillDir string, record InstallRecord) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(filepath.Join(skillDir, ".kiss-install.json"), data, 0o644)
+	return os.WriteFile(filepath.Join(skillDir, installRecordFileName), data, 0o644)
 }

@@ -14,7 +14,8 @@ KISS 有两类安装对象：
 1. 安装前先告诉用户会修改哪些位置，并获得明确确认。
 2. 如果 `kiss` 已存在，先运行 `kiss --version`；不要重复安装同版本。
 3. 如果需要安装 KISS CLI，先识别操作系统，再推荐对应命令。
-4. 如果需要安装 KISS bridge skill，使用 `npx skills add wwulfric/kiss --skill kiss`。
+4. 如果需要安装 KISS bridge skill，默认使用 `kiss setup` 写入 `$HOME/.agents`；只有 Claude Code 使用
+   `kiss setup --agent claude` 写入 `$HOME/.claude`。
 5. 不要枚举、读取、同步或总结 `$KISS_HOME/skills` 里的 skill。
 6. 不要在用户输入 `/kiss <skill>` 时自动执行 `kiss add`；缺失 skill 时提示用户显式安装。
 7. 不要替 KISS 配置任何模型 provider、API key 或 standalone executor。
@@ -30,7 +31,6 @@ macOS / Linux：
 uname -s
 uname -m
 command -v kiss || true
-command -v npx || true
 ```
 
 Windows PowerShell：
@@ -39,7 +39,6 @@ Windows PowerShell：
 $PSVersionTable
 [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
 Get-Command kiss -ErrorAction SilentlyContinue
-Get-Command npx -ErrorAction SilentlyContinue
 ```
 
 如果 `kiss` 已安装：
@@ -98,51 +97,23 @@ irm https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.ps1 |
 
 ### 3. 安装 KISS bridge skill
 
-优先使用 Vercel Skills / skills.sh 兼容 CLI，并显式指定只安装 `kiss`：
+#### 默认 .agents 目录
 
 ```bash
-npx skills add wwulfric/kiss --skill kiss
+kiss setup
 ```
 
-不要省略 `--skill kiss`。本仓库还包含项目私有的 `release` skill，省略 `--skill kiss` 时部分安装工具会进入交互选择，甚至安装全部 skill。
+不指定 `--agent` 时，`kiss setup` 会把 KISS bridge skill 写入 `$HOME/.agents/skills/kiss/SKILL.md`，不依赖 `npx`、Node.js 或
+Vercel Skills CLI。
 
-如果没有 `npx`，不要自动安装 Node.js；先询问用户是否允许安装 Node.js，或者使用下面的手动安装方式。
-
-#### Codex 手动安装
-
-用户级：
+#### Claude Code
 
 ```bash
-mkdir -p "$HOME/.agents/skills/kiss"
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/skills/kiss/SKILL.md \
-  -o "$HOME/.agents/skills/kiss/SKILL.md"
+kiss setup --agent claude
 ```
 
-项目级：
-
-```bash
-mkdir -p ".agents/skills/kiss"
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/skills/kiss/SKILL.md \
-  -o ".agents/skills/kiss/SKILL.md"
-```
-
-#### Claude Code 手动安装
-
-用户级：
-
-```bash
-mkdir -p "$HOME/.claude/skills/kiss"
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/skills/kiss/SKILL.md \
-  -o "$HOME/.claude/skills/kiss/SKILL.md"
-```
-
-项目级：
-
-```bash
-mkdir -p ".claude/skills/kiss"
-curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/skills/kiss/SKILL.md \
-  -o ".claude/skills/kiss/SKILL.md"
-```
+`kiss setup --agent claude` 会把 KISS bridge skill 写入 `$HOME/.claude/skills/kiss/SKILL.md`，不依赖 `npx`、Node.js 或
+Vercel Skills CLI。
 
 如果 agent 没有立刻识别新 skill，提示用户重启对应 agent 会话。
 
@@ -159,7 +130,8 @@ kiss run find-skills "browser testing"
 
 预期行为：
 
-1. `kiss add` 成功，或提示 `find-skills` 已经安装。
+1. `kiss add` 成功；如果同名但不同来源已安装，会提示需要 `--force`。同一个 GitHub source 仅 `@ref` 不同时会按更新处理，不需要
+   `--force`。
 2. `kiss run` 输出 `find-skills` 的 Markdown 上下文。
 3. 输出中只包含 `find-skills` 当前 skill，不暴露 KISS store 里的其他 skill。
 
@@ -208,11 +180,12 @@ $kiss <已安装的-skill> <参数>
 - macOS / Linux 用户目录安装时，确认 `$HOME/.local/bin` 在 `PATH` 中。
 - Windows 安装后需要打开新的 PowerShell 窗口刷新 `PATH`。
 
-### `npx skills add wwulfric/kiss --skill kiss` 失败
+### `kiss setup --agent ...` 失败
 
-- 检查是否安装 Node.js / npm。
-- 如果用户不想安装 Node.js，使用对应 agent 的手动安装方式。
-- 手动安装后如果 agent 没识别，重启 agent 会话。
+- 确认 `kiss --version` 可以正常执行。
+- 默认安装失败时，检查 `$HOME/.agents/skills` 是否可写。
+- Claude Code 安装失败时，检查 `$HOME/.claude/skills` 是否可写。
+- 安装后如果 agent 没识别，重启 agent 会话。
 
 ### `/kiss <skill>` 报未安装
 
@@ -221,6 +194,14 @@ $kiss <已安装的-skill> <参数>
 ### `kiss add vercel-labs/skills --skill find-skills` 下载失败
 
 端到端验证需要访问 GitHub 和 `codeload.github.com`。如果网络、DNS、代理或公司防火墙导致下载失败，向用户报告失败原因即可；不要改用其他第三方 skill 做自动验证，也不要自动安装搜索结果。
+
+如果下载大仓库 archive 时出现 `Client.Timeout or context cancellation while reading body`，可以让用户重试：
+
+```bash
+KISS_DOWNLOAD_TIMEOUT=10m kiss add vercel-labs/skills --skill find-skills
+```
+
+KISS 使用 Go 标准 HTTP 代理环境变量；如需代理，请在执行命令的 shell 中设置 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`。
 
 ### 安装脚本提示当前版本相同或更新
 
@@ -242,7 +223,7 @@ irm https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.ps1 |
 安装完成后，向用户说明：
 
 - KISS CLI 版本：`kiss --version` 的输出。
-- KISS bridge skill 的安装方式：`npx skills add wwulfric/kiss --skill kiss` 或手动路径。
+- KISS bridge skill 的安装方式：`kiss setup` 或 `kiss setup --agent claude`。
 - 如果执行了端到端验证，说明 `find-skills` 已安装到 KISS 专属目录，并汇报 `kiss run find-skills ...` 的结果。
 - 是否需要重启 agent 会话或打开新终端。
 - 哪些检查被跳过，以及跳过原因。

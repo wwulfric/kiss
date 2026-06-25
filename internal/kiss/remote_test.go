@@ -5,64 +5,34 @@ import (
 	"bytes"
 	"compress/gzip"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestAddRemoteHTTPSkillWritesSHAAndFullName(t *testing.T) {
-	archive := makeSkillArchive(t, "remote-root", "remote", "0.2.0", "Remote instructions.")
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(archive)
-	}))
-	defer server.Close()
-	oldTransport := remoteHTTPTransport
-	remoteHTTPTransport = server.Client().Transport
-	defer func() { remoteHTTPTransport = oldTransport }()
-
-	paths, err := NewPaths(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := AddRemoteSkill(paths, server.URL+"/remote.tar.gz", "remote"); err != nil {
-		t.Fatalf("add remote: %v", err)
-	}
-	metadata, ok, err := GetSkillMetadata(paths, "remote")
-	if err != nil || !ok {
-		t.Fatalf("metadata missing ok=%v err=%v", ok, err)
-	}
-	if metadata.Source.Kind != "https" || metadata.Source.URI != server.URL+"/remote.tar.gz" {
-		t.Fatalf("unexpected source: %+v", metadata.Source)
-	}
-	if metadata.Source.SHA256 == "" {
-		t.Fatal("expected sha256")
-	}
-	if metadata.FullName != server.URL+"/remote.tar.gz" {
-		t.Fatalf("unexpected full name %q", metadata.FullName)
-	}
-	var out bytes.Buffer
-	if err := RunSkill(paths, "remote", nil, &out); err != nil {
-		t.Fatalf("run remote: %v", err)
-	}
-	if !strings.Contains(out.String(), "Remote instructions.") {
-		t.Fatalf("missing remote instructions: %s", out.String())
-	}
-}
-
 func TestParseGitHubSource(t *testing.T) {
-	got, err := ParseGitHubSource("github:vercel-labs/agent-skills/skills/browser-test#v1.2.3")
+	got, err := ParseGitHubSource("github:vercel-labs/agent-skills/skills/browser-test@v1.2.3")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Owner != "vercel-labs" || got.Repo != "agent-skills" || got.Path != "skills/browser-test" || got.Ref != "v1.2.3" {
 		t.Fatalf("unexpected parse result: %+v", got)
 	}
+	legacy, err := ParseGitHubSource("github:vercel-labs/agent-skills/skills/browser-test#v1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy != got {
+		t.Fatalf("expected #ref compatibility, got %+v", legacy)
+	}
 	sha := "0123456789abcdef0123456789abcdef01234567"
 	defer withGitHubTestServer(t, sha, nil, nil)()
-	resolved, archiveURL, subdir, err := ResolveRemoteSource("github:vercel-labs/agent-skills/skills/browser-test#v1.2.3")
+	resolved, archiveURL, subdir, err := ResolveRemoteSource("github:vercel-labs/agent-skills/skills/browser-test@v1.2.3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +41,31 @@ func TestParseGitHubSource(t *testing.T) {
 	}
 	if !strings.Contains(archiveURL, "/tar.gz/"+sha) {
 		t.Fatalf("archive URL should use resolved SHA, got %s", archiveURL)
+	}
+}
+
+func TestResolveRemoteSourceRejectsGenericHTTPS(t *testing.T) {
+	_, _, _, err := ResolveRemoteSource("https://example.com/browser-test.tar.gz")
+	if err == nil || !strings.Contains(err.Error(), "unsupported remote source") {
+		t.Fatalf("expected generic https source rejection, got: %v", err)
+	}
+}
+
+func TestResolveRemoteSourceDefaultsToMasterWhenMainMissing(t *testing.T) {
+	masterSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	defer withGitHubArchiveByRefTestServer(t, map[string]githubRefArchive{
+		"master": {sha: masterSHA},
+	}, nil)()
+
+	resolved, archiveURL, _, err := ResolveRemoteSource("github:owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Ref != "master" || resolved.Resolved != masterSHA {
+		t.Fatalf("unexpected default ref resolution: %+v", resolved)
+	}
+	if !strings.Contains(archiveURL, "/tar.gz/"+masterSHA) {
+		t.Fatalf("archive URL should use resolved master SHA, got %s", archiveURL)
 	}
 }
 
@@ -135,6 +130,92 @@ func TestAddRemoteGitHubSkillWritesResolvedCommit(t *testing.T) {
 	}
 }
 
+func TestAddRemoteGitHubSameSourceDifferentRefRefreshesWithoutForce(t *testing.T) {
+	v1Archive := makeNestedSkillArchive(t, "repo-main", "skills/browser-test", "browser-test", "0.1.0", "Version one.")
+	v2Archive := makeNestedSkillArchive(t, "repo-main", "skills/browser-test", "browser-test", "0.2.0", "Version two.")
+	defer withGitHubArchiveByRefTestServer(t, map[string]githubRefArchive{
+		"v1": {sha: "1111111111111111111111111111111111111111", archive: v1Archive},
+		"v2": {sha: "2222222222222222222222222222222222222222", archive: v2Archive},
+	}, nil)()
+
+	paths, err := NewPaths(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AddRemoteSkill(paths, "github:owner/repo/skills/browser-test@v1", "browser-test"); err != nil {
+		t.Fatalf("add v1: %v", err)
+	}
+	original, ok, err := GetSkillMetadata(paths, "browser-test")
+	if err != nil || !ok {
+		t.Fatalf("metadata missing ok=%v err=%v", ok, err)
+	}
+	if original.Source.Ref != "v1" || original.Version == "" {
+		t.Fatalf("unexpected original metadata: %+v", original)
+	}
+
+	if err := AddRemoteSkill(paths, "github:owner/repo/skills/browser-test@v2", "browser-test"); err != nil {
+		t.Fatalf("add v2 should refresh same source without force: %v", err)
+	}
+	metadata, ok, err := GetSkillMetadata(paths, "browser-test")
+	if err != nil || !ok {
+		t.Fatalf("metadata missing ok=%v err=%v", ok, err)
+	}
+	if metadata.Source.Ref != "v2" || metadata.Source.Resolved != "2222222222222222222222222222222222222222" {
+		t.Fatalf("unexpected refreshed source: %+v", metadata.Source)
+	}
+	if metadata.Version == original.Version {
+		t.Fatalf("expected skillFolderHash version to change, still %q", metadata.Version)
+	}
+	if metadata.InstalledAt != original.InstalledAt {
+		t.Fatalf("expected installed_at to be preserved, before=%q after=%q", original.InstalledAt, metadata.InstalledAt)
+	}
+	var out bytes.Buffer
+	if err := RunSkill(paths, "browser-test", nil, &out); err != nil {
+		t.Fatalf("run refreshed skill: %v", err)
+	}
+	if !strings.Contains(out.String(), "Version two.") {
+		t.Fatalf("expected refreshed instructions:\n%s", out.String())
+	}
+}
+
+func TestAddRemoteGitHubAllowsExistingSkillsImportSameSource(t *testing.T) {
+	sha := "2222222222222222222222222222222222222222"
+	archive := makeNestedSkillArchive(t, "repo-main", "skills/find-skills", "find-skills", "0.1.0", "Imported source refresh.")
+	defer withGitHubTestServer(t, sha, archive, nil)()
+
+	paths, err := NewPaths(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertSkillMetadata(paths, SkillMetadata{
+		Name:        "find-skills",
+		FullName:    "skills-import:vercel-labs/skills/skills/find-skills",
+		InstalledAt: "2026-06-15T00:00:00Z",
+		Source: SourceMetadata{
+			Kind: skillsImportSourceKind,
+			URI:  filepath.Join(t.TempDir(), "find-skills"),
+			SkillsImport: &SkillsImportSourceMetadata{
+				Source:     "vercel-labs/skills",
+				SourceType: "github",
+				SkillPath:  "skills/find-skills/SKILL.md",
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AddRemoteSkill(paths, "github:vercel-labs/skills/skills/find-skills#main", "find-skills"); err != nil {
+		t.Fatalf("add same source after skills import: %v", err)
+	}
+	metadata, ok, err := GetSkillMetadata(paths, "find-skills")
+	if err != nil || !ok {
+		t.Fatalf("metadata missing ok=%v err=%v", ok, err)
+	}
+	if metadata.Source.Kind != "github" || metadata.Source.URI != "vercel-labs/skills/skills/find-skills" {
+		t.Fatalf("expected github source takeover, got %+v", metadata.Source)
+	}
+}
+
 func TestDownloadArchiveRejectsOversizedResponse(t *testing.T) {
 	oldMax := maxRemoteArchiveBytes
 	maxRemoteArchiveBytes = 16
@@ -151,6 +232,46 @@ func TestDownloadArchiveRejectsOversizedResponse(t *testing.T) {
 	}
 	if _, _, err := downloadArchive(paths, server.URL, "too-large"); err == nil {
 		t.Fatal("expected download size limit error")
+	}
+}
+
+func TestDownloadArchiveUsesConfiguredDownloadTimeout(t *testing.T) {
+	oldTransport := remoteHTTPTransport
+	var observedTimeout time.Duration
+	remoteHTTPTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		if !ok {
+			return nil, errors.New("request context is missing deadline")
+		}
+		observedTimeout = time.Until(deadline)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("archive")),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})
+	defer func() { remoteHTTPTransport = oldTransport }()
+	t.Setenv("KISS_DOWNLOAD_TIMEOUT", "2m")
+
+	paths, err := NewPaths(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := downloadArchive(paths, "https://example.com/skill.tar.gz", "timeout"); err != nil {
+		t.Fatalf("download archive: %v", err)
+	}
+	if observedTimeout < 110*time.Second || observedTimeout > 2*time.Minute {
+		t.Fatalf("expected timeout close to 2m, got %s", observedTimeout)
+	}
+}
+
+func TestConfiguredRemoteTimeoutFallsBackForInvalidEnv(t *testing.T) {
+	t.Setenv("KISS_DOWNLOAD_TIMEOUT", "not-a-duration")
+
+	got := configuredRemoteTimeout("KISS_DOWNLOAD_TIMEOUT", 3*time.Second)
+	if got != 3*time.Second {
+		t.Fatalf("expected fallback timeout, got %s", got)
 	}
 }
 
@@ -251,7 +372,7 @@ func TestAddRemoteSkillRejectsInvalidNameBeforeDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := AddRemoteSkill(paths, "https://example.com/skill.tar.gz", "../bad"); err == nil {
+	if err := AddRemoteSkill(paths, "github:owner/repo", "../bad"); err == nil {
 		t.Fatal("expected invalid skill name error")
 	}
 }

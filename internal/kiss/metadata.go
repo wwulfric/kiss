@@ -17,15 +17,12 @@ type MetadataDB struct {
 	Skills        map[string]SkillMetadata `json:"skills"`
 }
 
-// SkillMetadata 记录一个已安装 skill 的 manifest、source 和安装位置。
+// SkillMetadata 记录一个已安装 skill 的入口信息、source 和安装位置。
 type SkillMetadata struct {
 	Name          string         `json:"name"`
 	FullName      string         `json:"full_name"`
-	ManifestName  string         `json:"manifest_name"`
 	Version       string         `json:"version"`
-	Description   string         `json:"description,omitempty"`
 	Source        SourceMetadata `json:"source"`
-	Runner        RunnerMetadata `json:"runner"`
 	InstalledPath string         `json:"installed_path"`
 	InstalledAt   string         `json:"installed_at"`
 	UpdatedAt     string         `json:"updated_at"`
@@ -34,17 +31,27 @@ type SkillMetadata struct {
 
 // SourceMetadata 记录 skill 的安装来源和可复现更新所需的信息。
 type SourceMetadata struct {
-	Kind     string `json:"kind"`
-	URI      string `json:"uri"`
-	Ref      string `json:"ref"`
-	Resolved string `json:"resolved"`
-	SHA256   string `json:"sha256"`
+	Kind         string                      `json:"kind"`
+	URI          string                      `json:"uri"`
+	Ref          string                      `json:"ref"`
+	Resolved     string                      `json:"resolved"`
+	SHA256       string                      `json:"sha256"`
+	SkillsImport *SkillsImportSourceMetadata `json:"skills_import,omitempty"`
 }
 
-// RunnerMetadata 记录 KISS 当前支持的 Markdown runner 入口。
-type RunnerMetadata struct {
-	Type  string `json:"type"`
-	Entry string `json:"entry"`
+// SkillsImportSourceMetadata 保存从 Vercel Skills CLI 全局安装记录导入时的原始审计信息。
+type SkillsImportSourceMetadata struct {
+	OriginalPath    string `json:"original_path"`
+	LockPath        string `json:"lock_path"`
+	Source          string `json:"source,omitempty"`
+	SourceType      string `json:"source_type,omitempty"`
+	SourceURL       string `json:"source_url,omitempty"`
+	Ref             string `json:"ref,omitempty"`
+	SkillPath       string `json:"skill_path,omitempty"`
+	SkillFolderHash string `json:"skill_folder_hash,omitempty"`
+	PluginName      string `json:"plugin_name,omitempty"`
+	InstalledAt     string `json:"installed_at,omitempty"`
+	UpdatedAt       string `json:"updated_at,omitempty"`
 }
 
 // EnsureMetadataDB 确保 skills.db.json 存在。

@@ -1,425 +1,138 @@
-# KISS Skill Store 技术架构
+# KISS Skill Store 架构
 
-本文只描述 KISS Skill Store 的技术设计。产品背景、目标用户、用户故事和功能优先级见 [`kiss-skill-store-prd.md`](kiss-skill-store-prd.md)。
+本文描述 KISS 的系统边界、组件职责和关键架构约束。产品定位和优先级见 [`kiss-skill-store-prd.md`](kiss-skill-store-prd.md)
+。命令参数、字段结构、测试矩阵和实现细节以代码、测试和安装文档为准。
 
 ## 1. 架构目标
 
-KISS 是一个独立的 skill store 和 explicit context provider。它借鉴 Vercel Skills 生态中“skill 是可分发目录、通过 CLI 安装、入口是 `SKILL.md`”的简单模型，但刻意不把 KISS 管理的 skill 安装到任何 agent 的原生扫描目录。KISS 不提供 standalone LLM executor，不配置、不代理、不管理任何模型 provider；模型推理、工具调用和文件编辑始终由调用方 coding agent 负责。
+KISS 是一个独立的 skill store 和 explicit context provider。它不替代 coding agent，不进入模型推理循环，也不把 KISS 管理的
+skill 注册到任何 agent 的原生扫描目录。
 
-技术目标：
+核心目标：
 
-1. `kiss run <skill> <args>` 是唯一稳定核心执行入口，但只运行已安装 skill，不自动安装。
-2. 仓库内 `skills/kiss` 的 KISS bridge skill 是推荐的 agent 接入方式，并且只调用 CLI。
-3. Store 必须位于 `$KISS_HOME/skills`，默认 `$KISS_HOME=${XDG_DATA_HOME:-~/.local/share}/kiss`。
-4. Loader 每次只读取一个被点名的 skill。
-5. 安装必须可审计：本地数据库记录来源、ref、resolved commit、sha256、安装路径、安装时间。
-6. 默认主路径只输出被点名 skill 的上下文；KISS 不直接执行 skill 内脚本。
-7. `kiss run` 不依赖模型 API key、provider 配置或后台 agent loop。
+1. `run` 只加载已安装且被点名的 skill，不自动安装。
+2. 每次调用只暴露一个 skill 的上下文。
+3. 安装、更新、导入和删除都是用户显式动作。
+4. KISS 只输出 Markdown 上下文，不执行 skill 内脚本。
+5. 本地状态可审计、可备份、可删除。
 
 ## 2. 系统边界
 
 ```text
-Install path:
+Install / manage path:
 
 User
-  | kiss add <source> [--name <skill>] [--skill <repo-skill>]
-  v
-KISS CLI
-  |-- Resolver: explicit source -> package
-  |-- Installer: copy/download -> verify -> install
-  |-- Store: $KISS_HOME/skills
-  |-- Metadata DB: $KISS_HOME/skills.db.json
+  -> KISS CLI
+  -> Resolver / Installer / Metadata
+  -> KISS Store
 
 Run path:
 
 User
-  | /kiss <skill> <args>
-  v
-Agent KISS bridge skill
-  |
-  | kiss run <skill> <args>
-  v
-KISS CLI
-  |-- Metadata DB: confirm installed; no auto-install
-  |-- Loader: read exactly one skill
-  |-- Runner: markdown envelope for the selected skill
-  v
-Agent receives only selected skill context
-Agent performs the requested work with its own model and tools
+  -> Agent bridge skill
+  -> KISS CLI
+  -> Loader / Envelope
+  -> Agent receives selected skill context
 ```
 
-KISS 不负责替代 coding agent，也不负责把 KISS 管理的 skill 同步到 Claude、Codex、Cursor、Gemini 等工具的全局目录。安装和加载是两个显式动作：`kiss add` 负责保存 skill 与元数据，`kiss run` 只负责加载已安装且被点名的 skill，并把结果交给外层 agent 消费。仓库内 `skills/kiss/SKILL.md` 只是 KISS bridge skill，用于被 `npx skills add wwulfric/kiss --skill kiss` 安装到 agent 原生 skill 系统；安装命令必须显式指定 `--skill kiss`，避免把项目私有 skill 一起安装。它不包含 KISS store 中的任何用户 skill。KISS 本身不进入 LLM 推理循环。
-
-## 3. 本地目录布局
-
-默认目录：
-
-```text
-$KISS_HOME/
-  skills.db.json
-  skills/
-    browser-test/
-      kiss.skill.toml
-      SKILL.md
-      assets/
-      refs/
-      .kiss-install.json
-  cache/
-    downloads/
-  logs/
-    kiss.log
-```
-
-说明：
-
-- `skills.db.json`：本地已安装 skill 的元数据数据库，供 `list/show/remove/doctor` 查询。
-- `skills/<name>`：已安装 skill。目录名是 KISS 本地别名，不必等于上游仓库名。
-- `.kiss-install.json`：安装来源、commit/tag、sha256、安装时间、KISS 版本。
-- `cache/`：可删除缓存，不影响已安装 skill。
-- `logs/`：只记录 KISS 操作元数据，默认不记录用户传给 skill 的敏感参数。
-
-## 4. Skill 包格式
-
-MVP 兼容“一个目录里包含 `SKILL.md`”的模式，并增加一个很小的 KISS manifest。
-
-```text
-my-skill/
-  kiss.skill.toml
-  SKILL.md
-  assets/
-  references/
-```
-
-`kiss.skill.toml` 示例：
-
-```toml
-name = "browser-test"
-version = "0.1.0"
-description = "Run a focused browser test workflow when explicitly invoked."
-entry = "SKILL.md"
-
-[runner]
-type = "markdown"
-```
-
-字段约定：
-
-- `name`：KISS 本地唯一名称。
-- `version`：语义化版本或上游 commit/tag。
-- `description`：只供 `kiss list` 和人工查看；不会在 agent 启动时暴露。
-- `entry`：默认 `SKILL.md`。
-- `runner.type`：只支持 `markdown`；KISS 不实现 command runner。
-
-## 5. 本地元数据数据库
-
-KISS 安装 skill 后，必须在 `$KISS_HOME/skills.db.json` 保存元数据。MVP 使用 JSON 文件作为核心数据库，而不是 SQLite、DuckDB 或 Parquet，理由是：可读、可审计、易删除、方便测试、无额外 native 依赖。DuckDB + Parquet 不进入 `run/list/show` 的核心路径。
-
-数据库结构：
-
-```json
-{
-  "schema_version": 1,
-  "skills": {
-    "browser-test": {
-      "name": "browser-test",
-      "full_name": "github:vercel-labs/agent-skills/skills/browser-test",
-      "manifest_name": "browser-test",
-      "version": "0.1.0",
-      "description": "Run focused browser test workflow.",
-      "source": {
-        "kind": "github",
-        "uri": "vercel-labs/agent-skills/skills/browser-test",
-        "ref": "v0.1.0",
-        "resolved": "",
-        "sha256": ""
-      },
-      "runner": {
-        "type": "markdown",
-        "entry": "SKILL.md"
-      },
-      "installed_path": "$KISS_HOME/skills/browser-test",
-      "installed_at": "2026-06-02T00:00:00Z",
-      "updated_at": "2026-06-02T00:00:00Z",
-      "kiss_version": "0.1.2"
-    }
-  }
-}
-```
-
-字段说明：
+KISS 的边界很窄：
 
-- `schema_version`：数据库结构版本，用于兼容结构变更。
-- `skills`：以 KISS 本地 skill 名称为 key 的对象。
-- `name`：KISS 本地短名，也是 `$KISS_HOME/skills/<name>` 的目录名；用户用它执行 `kiss run <name>`。
-- `full_name`：来源限定全称，用于审计、去重、迁移和 update。格式建议为 `github:owner/repo/path/to/skill`、`https://example.com/skill.tar.gz` 或 `local:/abs/path/to/skill`。
-- `manifest_name`：skill manifest 中声明的名称。
-- `source.kind`：`local`、`github`、`https` 等来源类型。
-- `source.uri`：本地绝对路径、GitHub spec 或 URL。
-- `source.ref` / `source.resolved`：远程来源的用户指定 ref 和解析后的 commit；本地来源可为空。
-- `source.sha256`：安装包或内容摘要；本地 MVP 可为空，远程安装必须写入。
-- `runner`：runner 类型和入口文件。
-- `installed_path`：安装后的 skill 目录。
-- `installed_at` / `updated_at`：安装和最近更新的 UTC 时间。
-- `kiss_version`：写入该记录的 KISS 版本。
+- KISS 负责保存 skill、记录来源、加载被点名 skill、输出上下文。
+- 外层 agent 负责理解上下文、调用工具、编辑文件和执行后续任务。
+- KISS bridge skill 只负责把显式 `/kiss` / `$kiss` 请求转发给 CLI。
+- KISS store 不应被注册为 Claude、Codex、Cursor、Gemini 等工具的全局 skill 目录。
+- `kiss setup` 可以把 KISS bridge skill 安装到支持的 agent 原生 skill 目录，但不安装 KISS 管理的第三方
+  skill；具体目录以安装指南和代码为准。
 
-`kiss list` 默认只读取数据库中的 `name/version/source.kind/full_name`。`kiss show <name>` 输出单条完整元数据。`kiss run <name>` 可以读取数据库确认安装存在，但仍只加载该 skill 的 manifest 和 `SKILL.md`。
+## 3. 核心组件
 
-### 5.1 为什么不把 DuckDB + Parquet 作为核心数据库
+| 组件        | 职责                                 | 边界                             |
+|-----------|------------------------------------|--------------------------------|
+| CLI       | 接收显式管理和运行命令                        | 不做后台同步                         |
+| Store     | 保存 KISS 管理的 skill                  | 不写入 agent 全局目录或项目目录            |
+| Metadata  | 保存本地索引和来源信息                        | 不作为 agent discovery catalog 暴露 |
+| Resolver  | 将明确 source 转为可安装包                  | 不支持裸名称远程搜索                     |
+| Installer | 安装、替换、校验包内容                        | 不执行包内脚本                        |
+| Loader    | 读取被点名 skill 的入口 Markdown           | 不枚举其他 skill                    |
+| Envelope  | 生成给 agent 消费的上下文输出                 | 不调用模型 provider                 |
+| Setup     | 安装 KISS bridge skill 到支持的 agent 目录 | 不安装第三方 skill                   |
+| Bridge    | 连接 agent slash command 和 CLI       | 不包含用户安装的 skill                 |
 
-DuckDB + Parquet 可以用于分析，但不适合作为 KISS MVP 的核心元数据数据库：
+## 4. 本地状态模型
 
-- KISS 元数据是小规模 key-value 查询，核心操作是 `get(name)`、`list`、`show` 和 `remove`，不需要列式分析能力。
-- DuckDB 会引入 native 依赖和跨平台分发复杂度，不符合默认单文件 CLI 的低依赖目标。
-- Parquet 适合批量分析和压缩存储，不适合频繁的小规模记录更新。
-- JSON 更便于用户直接查看、备份、删除和手动修复。
+KISS 的本地状态由三类内容组成：
 
-因此 `kiss run`、`kiss list` 和 `kiss show` 不依赖 DuckDB。
+- **已安装 skill**：存放在 KISS 专属 store 中，是 `run` 唯一会加载的内容来源。
+- **元数据索引**：记录审计和管理所需的来源、版本/摘要和安装状态。
+- **缓存和日志**：服务于安装、更新和排查；删除后不应影响已安装 skill 的可运行性。
 
-## 6. Source 解析与 add API
+架构约束：
 
-`kiss add` 尽量贴近 Vercel Skills / skills.sh 的安装体验：用户传入明确 source，KISS 把 source 安装到 `$KISS_HOME/skills/<name>`，并在 `skills.db.json` 记录来源。KISS 不提供远程索引子命令，也不把单个裸 skill 名称解析为远程包。
+- 已安装 skill 的目录名是 KISS 本地名称，不要求等于上游名称。
+- 元数据用于管理命令和审计，不用于在 agent 启动时暴露 skill catalog。
+- 删除 KISS 专属目录应能完整移除 KISS 管理的状态。
+- 具体文件名、schema 和字段兼容策略属于实现细节。
 
-支持的输入形态：
+## 5. Skill 包模型
 
-```bash
-kiss add ./local-skill
-kiss add file:///abs/path/to/local-skill
-kiss add owner/repo
-kiss add owner/repo --skill skill-name
-kiss add https://github.com/owner/repo
-kiss add github:owner/repo/skills/skill-name#v0.1.0
-kiss add https://example.com/skill.tar.gz --name skill-name
-```
+KISS 兼容“目录 + Markdown 入口”的简单 skill 包模型。入口 Markdown 是 KISS 与 agent 之间的唯一上下文交接内容。
 
-解析规则：
+架构约束：
 
-1. 本地路径和 `file://` URL 走本地安装；如果未传 `--name`，从 manifest 或目录名推断。
-2. `owner/repo`、`https://github.com/owner/repo` 和 `github:owner/repo[/path][#ref]` 归一为 GitHub source；`--skill <name>` 表示选择仓库内 `skills/<name>`，和 Vercel Skills 的多 skill 仓库安装方式保持一致。
-3. 通用 `https://...tar.gz` 必须显式传 `--name`，避免从任意 URL 猜测本地 skill 名称。
-4. 其他单裸名称，例如 `kiss add browser-test`，直接报错并提示用户传入本地路径、`file://`、GitHub source 或 HTTPS tarball。
+- skill 可以包含资料、示例或脚本文件，但 KISS 不读取脚本入口，也不执行脚本。
+- skill 内容只在被安装或被点名运行时读取。
+- KISS 管理的 skill 不应被提交回当前项目仓库。
 
-解析只发生在 `kiss add` 和 `kiss update` 这种显式管理命令中。`kiss run` 不触发 source 解析，不访问网络，不自动安装。
+## 6. 生命周期
 
-## 7. Run 协议
+### 6.1 安装和导入
 
-`kiss run <skill> <args>` 只处理已安装 skill；如果 skill 不在本地数据库或安装目录中，返回错误并提示先执行 `kiss add ...`，不得自动下载。默认 `markdown` runner 中，`run` 的含义是加载、校验、封装并输出当前 skill 的上下文，而不是由 KISS 直接调用大模型或直接完成用户任务。它的输出应当适合 agent 消费，而不是把所有已安装 skill 都暴露给 agent。
+安装和导入都属于显式管理动作。KISS 可以从本地路径、远程来源或已有全局安装快照创建 KISS store 中的副本，但不会在 `run`
+时自动拉取或补装。
 
-用户在 agent 中输入 `/kiss <skill> <args>` 时，推荐路径是由 `skills/kiss` KISS bridge skill 触发。它只做一件事：调用 `kiss run <skill> <args>`，把 stdout 作为当前轮上下文交给 agent。之后的推理、工具调用、脚本选择和文件修改都由外层 agent 按自己的权限模型完成。`/kiss kiss` 和 `$kiss kiss` 是递归调用 bridge skill 的无效请求，bridge skill 必须直接拒绝，不能调用 `kiss run kiss`。
+安装完成后，KISS 应记录足够的来源信息，支持用户审计、展示和后续显式更新。版本判断、来源解析、同源判断和导入细节由实现维护。
 
-推荐输出结构：
+### 6.2 运行
 
-```markdown
-# KISS loaded skill: browser-test
+运行路径必须保持最小：确认 skill 已安装，只读取被点名 skill 的入口 Markdown，并输出给调用方 agent。`run` 不访问网络、不更新本地
+store、不调用模型、不读取其他 skill。
 
-## User invocation
+### 6.3 更新和删除
 
-- Skill: browser-test
-- Args: url=https://example.com
+更新是基于已安装来源的显式刷新，删除是对本地 store 和 metadata 的显式清理。更新只在内容变化时替换已安装 skill。两者都不改变
+agent 的默认 discovery 行为。
 
-## Skill instructions
+## 7. 安全边界
 
-<SKILL.md content>
+KISS 的安全模型以“不自动暴露、不自动执行”为核心：
 
-## KISS runtime notes
+- 远程 skill 默认不可信。
+- 安装过程必须防止文件写入逃逸 KISS 管理边界。
+- `run` 不执行脚本，不读取模型 API key，不访问网络。
+- agent 只获得当前被调用 skill 的上下文。
+- Bridge skill 不把 KISS store 注册为 agent 原生 skill 目录。
 
-- Only this skill was loaded.
-- Do not inspect $KISS_HOME unless the user explicitly asks.
-- KISS did not call any model provider; the invoking agent decides how to use these instructions.
-- KISS does not execute skill scripts; the invoking agent decides what work to perform.
-```
+KISS 不能保证第三方 skill 内容本身安全；它只保证 KISS 主路径不会自动执行这些内容。
 
-## 8. 安全模型
+## 8. 架构决策
 
-### 8.1 默认不信任
+### 8.1 独立 Store
 
-从远端下载的 skill 默认是不受信任内容。KISS 应至少做以下检查：
+KISS 使用专属 store，而不是复用 agent 全局 skill 目录。这样可以避免 agent 启动时自动扫描 KISS skill，也让删除、备份和审计有明确边界。
 
-- 下载到临时目录，校验摘要后再原子安装。
-- 拒绝包含绝对路径、`..` 逃逸路径或 symlink 逃逸的包。
-- `kiss.skill.toml` 中只允许 `runner.type = "markdown"`；声明 command runner 或脚本入口的包不可由 KISS 执行。
-- 默认不允许 skill 自行修改 `$KISS_HOME` 下的元数据或其他 skill。
+### 8.2 CLI 优先
 
-### 8.2 最小暴露
+CLI 是稳定核心。Bridge skill、安装脚本和其他集成方式都应尽量薄，只转发到 CLI，不复制业务逻辑。
 
-- agent 只获得当前被调用 skill 的内容。
-- `kiss list` 默认只输出名称和版本；`kiss show <name>` 才显示描述和来源。
-- KISS bridge skill 不把 `$KISS_HOME/skills` 注册为 agent skill 目录。
+### 8.3 Markdown Context Handoff
 
-### 8.3 可复现
+KISS 的输出是给 agent 消费的 Markdown 上下文，不是一个独立执行结果。这个边界避免 KISS 变成另一个 agent runtime。
 
-- 安装记录固定 `ref`、commit 和 sha256。
-- `kiss update` 生成 diff 摘要，用户确认后替换。
-- `skills.db.json` 记录安装来源，`update` 只基于该来源重新拉取，不用裸名称重新解析。
+### 8.4 简单本地索引
 
-## 9. 与 AGENTS.md 的关系
+KISS 的核心状态规模很小，优先使用可读、可审计、易删除的本地索引。分析型存储或复杂数据库不进入核心路径。
 
-AGENTS.md 适合放项目级、总是需要的约束；KISS skill 适合放“用户显式调用时才需要”的过程知识。
+## 9. 参考资料
 
-推荐项目根目录 `AGENTS.md` 只写 KISS 的少量约束：
-
-```markdown
-- 只有当用户显式输入 `/kiss <skill>` 或 `$kiss <skill>` 时才调用 KISS。
-- 不要枚举或读取 `$KISS_HOME/skills` 来寻找可用 skill。
-- KISS skill 不属于本项目文件；不要把下载后的 skill 提交到仓库。
-```
-
-这样 agent 知道如何尊重 KISS 的边界，但不会在每次会话开始时读到所有 skill 的名称和描述。
-
-## 10. MVP 组件
-
-| 组件 | 职责 | MVP 实现建议 |
-| --- | --- | --- |
-| CLI | `kiss add/run/list/show/update/remove/doctor` | Go 单文件 CLI |
-| Store | 管理 `$KISS_HOME` | 普通文件系统 + 原子 rename |
-| Metadata DB | 管理 `skills.db.json` | JSON 文件 + schema version |
-| Resolver | 显式 source 到 package | CLI source parsing |
-| Installer | 下载和校验 | Git archive 或 tarball |
-| Loader | 只读取一个 skill | 读取 manifest + `SKILL.md` |
-| Runner | 输出当前 skill 上下文，不调用 LLM、不执行脚本 | `markdown` runner |
-| Bridge | `skills/kiss` KISS bridge skill | bridge skill 为唯一推荐接入，只调用 CLI |
-
-## 11. 实现技术路线
-
-KISS 的实现路线应先把“可运行的本地 CLI”做扎实，再增加远程安装、更新和 agent 接入。核心判断是：**不要先做平台，不要先做 UI，不要先做复杂生态；先做一个能被 `skills/kiss` KISS bridge skill 稳定调用的 `kiss run`，并把结果干净地交给外层 agent**。这个路线不包含 standalone LLM executor、command runner 或本地 untrusted-code sandbox。
-
-### 11.1 技术选型与分发策略
-
-MVP 采用 **Go** 实现 CLI。这个选择优先满足 PRD 的 NFR-1：普通用户不应为了使用 `kiss` 预装 Node、Bun 或 TypeScript 运行时。
-
-推荐策略：
-
-| 阶段 | 实现方式 | 用户是否需要 Node/Bun | 说明 |
-| --- | --- | --- | --- |
-| MVP 开发 | Go CLI | 不需要 | 标准库即可完成本地 store、manifest 解析、Markdown 输出和测试。 |
-| MVP 分发 | GitHub Release 预编译单文件 CLI + `install.sh` / `install.ps1` | 不需要 | macOS / Linux 主入口是 `curl .../install.sh \| bash`；Windows 主入口是 `irm .../install.ps1 \| iex`。 |
-| macOS 包管理 | Homebrew formula artifact | 不需要 | 作为 GitHub Release artifact 生成，不自动推送外部 tap。 |
-| 非目标入口 | npm / pnpm / bunx shim、Linux 发行版包、Windows 包管理器、MSI | 不适用 | 不进入当前交付范围。 |
-| 长期稳定 | Go CLI + 签名 release | 不需要 | 在 release 阶段补充 checksums、签名和平台矩阵。 |
-
-Release 构建应输出平台 tarball、`checksums.txt` 和由 checksum 派生的 `kiss.rb` Homebrew formula。macOS / Linux 用户默认通过 `curl .../install.sh | bash` 安装，Windows 用户默认通过 `irm .../install.ps1 | iex` 安装，脚本从 GitHub Release 下载对应平台 tarball。安装脚本必须先解析目标版本并检查本机已有 `kiss --version`：目标版本等于当前版本时跳过下载和安装，目标版本低于当前版本时默认不降级，目标版本高于当前版本时才下载并更新；显式设置 `KISS_FORCE_INSTALL=1` 时可强制重装或降级。KISS 发布版本以 Git tag 为唯一来源：源码默认版本是 `dev`，`scripts/build-release.sh` 用 `KISS_VERSION` 或 `git describe --tags --always --dirty` 通过 Go `ldflags -X` 注入 binary。GitHub Release workflow 只支持手动触发，必须在 release tag ref 上运行，并要求 `version` 输入与 tag 一致。Workflow 使用 OIDC + keyless cosign 对 `checksums.txt` 生成 detached signature 与 certificate，并作为 `checksums.txt.sig` / `checksums.txt.pem` 上传。安装脚本默认只做 sha256 校验；当用户显式设置 `KISS_VERIFY_SIGNATURE=1` 且本机存在 `cosign` 时，再验证 `checksums.txt` 的签名。`kiss.rb` 可以作为 GitHub Release artifact 或复制到独立 tap；KISS 本仓库不自动推送外部 tap。
-
-分发验收标准：
-
-```bash
-# 在没有 node、npm、bun 的干净环境中也应能运行
-kiss --version
-kiss doctor --kiss-home /tmp/kiss-test
-```
-
-建议包结构：
-
-```text
-cmd/kiss/
-  main.go          # 参数解析和命令分发
-internal/kiss/
-  paths.go         # KISS_HOME、临时目录、原子 rename
-  manifest.go      # kiss.skill.toml 解析和校验
-  install.go       # 本地安装、safe copy、安装记录
-  remote.go        # 显式 HTTPS/GitHub 远程安装、sha256、safe extract
-  metadata.go      # skills.db.json 读写和查询
-  runner.go        # markdown runner
-  list.go          # list/show/remove/doctor
-  types.go         # 共享类型和版本
-  kiss_test.go     # 核心行为测试
-```
-
-### 11.2 MVP 里程碑
-
-#### M0：仓库脚手架
-
-- 初始化 `cmd/kiss` 和 `internal/kiss`。
-- 使用 Go 标准库 `flag` 做命令解析。
-- 使用 `go test` 做单元测试。
-- 约定所有文件系统测试使用临时 `KISS_HOME`，禁止污染用户真实目录。
-
-验收标准：
-
-```bash
-kiss --help
-kiss doctor --kiss-home /tmp/kiss-test
-```
-
-#### M1：本地 skill 可运行
-
-先不接远程来源，只支持本地路径安装和运行：
-
-```bash
-kiss add ./fixtures/skills/browser-test
-kiss add file:///abs/path/to/browser-test --name browser-test
-kiss show browser-test
-kiss run browser-test url=https://example.com
-```
-
-实现重点：
-
-1. `paths.go` 解析 `$KISS_HOME`，默认 `${XDG_DATA_HOME:-~/.local/share}/kiss`。
-2. `manifest.go` 解析 `kiss.skill.toml`；如果没有 manifest，但存在 `SKILL.md`，自动补一个内存默认 manifest。
-3. `install.go` 从本地目录复制到临时目录，校验路径安全后原子安装到 `$KISS_HOME/skills/<name>`。
-4. `metadata.go` 写入 `$KISS_HOME/skills.db.json`，支持 `list/show/remove` 查询和更新。
-5. `runner.go` 只读取被点名 skill 的 manifest 和 `SKILL.md`，并输出 Markdown envelope。
-6. 本轮先不执行任何脚本。
-7. 不读取模型 API key，不要求配置模型 provider。
-
-验收标准：`kiss run` 输出中只能包含当前 skill，不包含 `$KISS_HOME/skills` 下其他 skill 的名称或描述。
-
-#### M2：显式远程安装
-
-已开始支持 Vercel 风格 GitHub source、GitHub tarball / explicit HTTPS tar.gz：只允许通过 `kiss add ...` 显式安装，不允许 `kiss run` 自动安装：
-
-```bash
-kiss add owner/repo
-kiss add vercel-labs/agent-skills --skill frontend-design
-kiss add github:owner/repo/path/to/skill#v0.1.0 --name browser-test
-kiss show browser-test
-kiss run browser-test url=https://example.com
-```
-
-实现重点：
-
-- CLI 层把 `owner/repo`、`owner/repo --skill <name>` 和 `https://github.com/owner/repo` 归一成 `github:` source；`remote.go` 继续支持 `github:`、`https:` 两类显式远程 source；`local` 与 `file://` 仍由 `install.go` 处理。
-- `remote.go` 下载到 `$KISS_HOME/cache/downloads`，计算 sha256，safe extract。
-- `.kiss-install.json` 和 `skills.db.json` 记录 source、ref、resolved、sha256、installed_at。
-- `kiss add` 不支持裸名称查询；用户必须提供本地路径、`file://`、GitHub source 或 HTTPS tarball。
-
-#### M3：显式更新
-
-基于 `skills.db.json` 中记录的安装来源做显式更新，不通过裸名称重新解析来源：
-
-```bash
-kiss add owner/repo --skill browser-test
-kiss update browser-test
-```
-
-实现重点：
-
-- `kiss update` 从已安装元数据恢复 source spec；本地 source 重新复制，远程 source 重新下载。
-- `kiss update` 下载到 side-by-side 目录，展示 manifest 摘要和 entry 文本 diff，确认后再替换。
-- entry diff 必须有输出上限；当内容过大时保留 sha256 摘要并提示 diff 被省略或截断。
-
-#### M4：KISS bridge skill
-
-在 CLI 稳定后，提供 `skills/kiss` KISS bridge skill：
-
-- KISS bridge skill：仓库内提供 `skills/kiss/SKILL.md`，通过 `npx skills add wwulfric/kiss --skill kiss` 安装桥接说明；安装命令必须显式指定 `--skill kiss`。当用户显式输入 `/kiss <skill> [args...]` 时，agent 调用 `kiss run` 并把 stdout 当作当前轮上下文。
-
-#### M5：移除本地执行器
-
-KISS 不实现 command runner。manifest 中显式声明 `runner.type = "command"` 或其他非 `markdown` runner type 时，CLI 必须拒绝安装或运行。skill 中可以包含引用资料、示例或脚本片段，但 KISS 只负责把 `SKILL.md` 作为上下文交给 agent；是否执行任何后续动作由外层 agent 按自己的权限模型决定。
-
-## 12. 测试路线
-
-最小测试矩阵：
-
-- `paths`：`KISS_HOME` 默认值、显式覆盖、跨平台路径。
-- `manifest`：合法 TOML、缺省 manifest、非法 runner。
-- `installer`：本地安装、重复安装、原子替换、远程 sha256 记录、路径穿越、symlink escape。
-- `metadata`：add 写入数据库、list/show 读取数据库、remove 删除记录、schema version 兼容、`full_name` 生成与展示。
-- `loader`：只加载指定 skill，不读取其他 skill。
-- `runner`：Markdown envelope 稳定、参数转义正确、JSON 输出可解析。
-- `resolver`：local/file/github/https source 解析；确认 `run` 不触发 resolver。
-
-## 13. 参考资料
-
-- Vercel changelog: `https://vercel.com/changelog/introducing-skills-the-open-agent-skills-ecosystem`
-- Vercel docs: `https://vercel.com/docs/agent-resources/skills`
-- Skills CLI docs: `https://skills.sh/docs/cli`
+- Vercel Skills: `https://vercel.com/docs/agent-resources/skills`
+- Skills CLI: `https://skills.sh/docs/cli`
