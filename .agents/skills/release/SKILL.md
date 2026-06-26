@@ -96,6 +96,8 @@ if ! command -v "$GO" >/dev/null 2>&1; then
 fi
 
 "$GO" fmt ./...
+bash -n scripts/sync-kiss-skill.sh
+scripts/sync-kiss-skill.sh --check
 "$GO" test ./...
 "$GO" vet ./...
 golangci-lint run
@@ -103,6 +105,8 @@ git diff --check
 git status --short
 sh -n scripts/install.sh
 ```
+
+`scripts/sync-kiss-skill.sh --check` 只校验，不自动修改工作区；如果失败，先运行 `scripts/sync-kiss-skill.sh`，提交同步后的内置 asset，再重新开始发布验证。
 
 如果本机有 `pwsh`，也检查 Windows 安装脚本语法：
 

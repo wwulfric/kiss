@@ -107,6 +107,8 @@ KISS bridge skill
     Windows 安装脚本；会比较本机版本和目标版本，相同或本机更新时默认跳过。
   scripts/build-release.sh
     构建平台 tarball 和 checksums。
+  scripts/sync-kiss-skill.sh
+    把公开 KISS bridge skill 同步到 Go 内置 setup asset；release 前用 --check 校验。
   scripts/generate-homebrew-formula.sh
     生成 Homebrew formula。
   .github/workflows/release.yml
