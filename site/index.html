@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KISS Skill Store</title>
+    <meta
+      name="description"
+      content="KISS 是面向 coding agent 的显式 skill store：先安装，再按名调用，每次只把被点名的 SKILL.md 交给 agent。"
+    />
+    <meta
+      name="keywords"
+      content="KISS, skill store, coding agent, explicit context, CLI"
+    />
+    <meta property="og:title" content="KISS Skill Store" />
+    <meta
+      property="og:description"
+      content="显式安装、按名调用、隔离存储，只把当前需要的 skill 上下文交给 agent。"
+    />
+    <meta property="og:type" content="website" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="KISS Skill Store">
+        <span class="brand-mark">K</span>
+        <span>KISS</span>
+      </a>
+      <nav class="nav" aria-label="主导航">
+        <a href="#flow">调用路径</a>
+        <a href="#boundary">安全边界</a>
+        <a href="#install">安装</a>
+        <a href="https://github.com/wwulfric/kiss">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <h1 id="hero-title">KISS Skill Store</h1>
+          <p class="hero-lede">
+            显式加载一个 skill，别把整个世界塞进上下文。
+          </p>
+          <p class="hero-body">
+            KISS 是面向 coding agent 的极简 skill store：先显式安装，再按名调用。
+            每次运行只把被点名的 <code>SKILL.md</code> 交给外层 agent，不替
+            agent 推理、执行脚本或调用模型。
+          </p>
+          <div class="hero-actions" aria-label="快速操作">
+            <button
+              class="button button-primary"
+              type="button"
+              data-copy="curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.sh | bash"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M8 8h10v12H8z" />
+                <path d="M6 16H4V4h12v2" />
+              </svg>
+              复制安装命令
+            </button>
+            <a class="button button-secondary" href="https://github.com/wwulfric/kiss">
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M7 17 17 7" />
+                <path d="M8 7h9v9" />
+              </svg>
+              查看 GitHub
+            </a>
+          </div>
+        </div>
+
+        <div class="hero-product" aria-label="KISS 命令行示例">
+          <div class="terminal-frame">
+            <div class="terminal-bar">
+              <span></span>
+              <span></span>
+              <span></span>
+              <strong>agent-session</strong>
+            </div>
+            <pre><code><span class="prompt">$</span> kiss add vercel-labs/agent-skills --skill browser-test
+installed browser-test
+
+<span class="prompt">$</span> /kiss browser-test url=https://example.com
+
+# KISS loaded skill: browser-test
+
+## User invocation
+- Skill: browser-test
+- Args: "url=https://example.com"
+
+## Skill instructions
+...only this skill enters context</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="flow" class="section flow-section" aria-labelledby="flow-title">
+        <div class="section-heading">
+          <h2 id="flow-title">三步完成一次干净的 skill 调用</h2>
+          <p>
+            安装是管理动作，运行是上下文交接。KISS 不自动下载、不自动更新，
+            也不把未点名的 skill 带进本轮任务。
+          </p>
+        </div>
+
+        <div class="flow-grid">
+          <article class="flow-item">
+            <span class="flow-number">01</span>
+            <h3>安装</h3>
+            <p>明确给出 source 和 skill 名称。</p>
+            <pre><code>kiss add owner/repo --skill browser-test</code></pre>
+          </article>
+          <article class="flow-item">
+            <span class="flow-number">02</span>
+            <h3>调用</h3>
+            <p>在 agent 中按名触发。</p>
+            <pre><code>/kiss browser-test url=https://example.com</code></pre>
+          </article>
+          <article class="flow-item">
+            <span class="flow-number">03</span>
+            <h3>交接</h3>
+            <p>KISS 输出当前 skill 的 Markdown context。</p>
+            <pre><code>kiss run browser-test url=https://example.com</code></pre>
+          </article>
+        </div>
+      </section>
+
+      <section id="boundary" class="section boundary-section" aria-labelledby="boundary-title">
+        <div class="boundary-copy">
+          <h2 id="boundary-title">边界窄，状态清楚，删除也干净</h2>
+          <p>
+            KISS 不试图成为另一个 agent runtime。它只保存 skill、记录来源、
+            加载被点名的入口 Markdown，并把上下文交还给调用方。
+          </p>
+          <dl class="proof-list">
+            <div>
+              <dt>隔离存储</dt>
+              <dd>KISS 管理的 skill 位于 <code>$KISS_HOME/skills</code>。</dd>
+            </div>
+            <div>
+              <dt>单 skill 暴露</dt>
+              <dd><code>run</code> 只读取当前被点名的 skill。</dd>
+            </div>
+            <div>
+              <dt>安装记录可审计</dt>
+              <dd>记录 source、resolved commit、sha256、skillFolderHash。</dd>
+            </div>
+            <div>
+              <dt>不接管执行</dt>
+              <dd>不执行 skill 脚本，不读取模型 key，不调用 provider。</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="audit-panel">
+          <pre><code>{
+  "name": "browser-test",
+  "source": "github:owner/repo/skills/browser-test",
+  "resolved": "9f36c2d...",
+  "sha256": "0b7f...",
+  "skill_folder_hash": "6aa2...",
+  "installed_at": "2026-07-06T10:24:00Z"
+}</code></pre>
+          <div class="store-map" aria-label="存储边界示意">
+            <span>KISS Store</span>
+            <span>Agent native skills</span>
+            <span>Project repo</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="install" class="section install-section" aria-labelledby="install-title">
+        <div class="section-heading">
+          <h2 id="install-title">把 `/kiss` 接到你的 agent</h2>
+          <p>
+            CLI 是稳定核心，bridge skill 保持很薄。先安装 KISS CLI，再用
+            <code>kiss setup</code> 写入当前 agent 可识别的 bridge skill。
+          </p>
+        </div>
+
+        <div class="install-grid">
+          <article class="command-block">
+            <div class="command-head">
+              <h3>macOS / Linux</h3>
+              <button
+                type="button"
+                data-copy="curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.sh | bash"
+                aria-label="复制 macOS 或 Linux 安装命令"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M8 8h10v12H8z" />
+                  <path d="M6 16H4V4h12v2" />
+                </svg>
+              </button>
+            </div>
+            <pre><code>curl -fsSL https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.sh | bash</code></pre>
+          </article>
+
+          <article class="command-block">
+            <div class="command-head">
+              <h3>Windows PowerShell</h3>
+              <button
+                type="button"
+                data-copy="irm https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.ps1 | iex"
+                aria-label="复制 Windows 安装命令"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M8 8h10v12H8z" />
+                  <path d="M6 16H4V4h12v2" />
+                </svg>
+              </button>
+            </div>
+            <pre><code>irm https://raw.githubusercontent.com/wwulfric/kiss/master/scripts/install.ps1 | iex</code></pre>
+          </article>
+        </div>
+
+        <div class="setup-strip">
+          <span>Bridge skill</span>
+          <code>kiss setup</code>
+          <code>kiss setup --agent claude</code>
+        </div>
+      </section>
+
+      <section class="closing" aria-labelledby="closing-title">
+        <h2 id="closing-title">从一个明确需要的 skill 开始。</h2>
+        <p>
+          安装、调用、审计、删除都保持显式。KISS 只负责把正确的上下文放到本轮任务里。
+        </p>
+        <a class="button button-primary" href="#install">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M12 5v14" />
+            <path d="m19 12-7 7-7-7" />
+          </svg>
+          查看安装命令
+        </a>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>KISS Skill Store</span>
+      <span>Keep It Stupid Simple.</span>
+    </footer>
+
+    <script>
+      const copyText = async (text) => {
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+
+        const field = document.createElement("textarea");
+        field.value = text;
+        field.setAttribute("readonly", "");
+        field.style.position = "fixed";
+        field.style.top = "-1000px";
+        document.body.appendChild(field);
+        field.select();
+        document.execCommand("copy");
+        document.body.removeChild(field);
+      };
+
+      const copyButtons = document.querySelectorAll("[data-copy]");
+
+      copyButtons.forEach((button) => {
+        button.addEventListener("click", async () => {
+          const original = button.getAttribute("aria-label") || button.textContent.trim();
+          try {
+            await copyText(button.dataset.copy);
+            button.classList.add("is-copied");
+            button.setAttribute("aria-label", "已复制");
+            setTimeout(() => {
+              button.classList.remove("is-copied");
+              button.setAttribute("aria-label", original);
+            }, 1600);
+          } catch {
+            button.classList.add("copy-failed");
+            setTimeout(() => button.classList.remove("copy-failed"), 1600);
+          }
+        });
+      });
+    </script>
+  </body>
+</html>
