@@ -114,6 +114,14 @@ kiss remove browser-test
 kiss doctor
 ```
 
+升级 KISS CLI 自身：
+
+```bash
+kiss upgrade
+kiss upgrade --version v0.0.5
+kiss upgrade --force
+```
+
 ## 本地开发
 
 直接用 Go 运行或构建：

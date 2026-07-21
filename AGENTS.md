@@ -69,6 +69,8 @@ CLI 入口
       基于已安装 source 的显式 update、预览和应用。
     diff.go
       update 预览使用的受限文本 diff。
+    upgrade.go
+      KISS CLI 自升级：下载 release artifact、校验 checksum，并替换当前二进制。
 
   测试
     install_test.go
@@ -78,6 +80,7 @@ CLI 入口
     skill_descriptor_test.go
     folder_hash_test.go
     setup_test.go
+    upgrade_test.go
     runner_test.go
     diff_test.go
     management_test.go

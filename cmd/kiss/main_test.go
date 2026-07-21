@@ -36,6 +36,19 @@ func TestRunAddLocalFileURLInfersName(t *testing.T) {
 	}
 }
 
+func TestTopLevelCommandAliases(t *testing.T) {
+	for _, arg := range []string{"--version", "-v", "version"} {
+		if !isVersionCommand(arg) {
+			t.Fatalf("expected %q to be a version command", arg)
+		}
+	}
+	for _, arg := range []string{"--help", "-h", "help"} {
+		if !isHelpCommand(arg) {
+			t.Fatalf("expected %q to be a help command", arg)
+		}
+	}
+}
+
 func TestResolveAddRequestGitHubShorthandWithSkill(t *testing.T) {
 	source, name, err := resolveAddRequest(addRequest{
 		source: "vercel-labs/agent-skills",
@@ -187,6 +200,31 @@ func TestParseSetupRejectsUnknownArg(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "usage: kiss setup") {
 			t.Fatalf("expected setup usage error for %v, got %v", args, err)
 		}
+	}
+}
+
+func TestParseUpgradeArgs(t *testing.T) {
+	got, err := parseUpgradeArgs([]string{"--version", "0.1.2", "--force"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != "0.1.2" || !got.Force {
+		t.Fatalf("unexpected upgrade options: %+v", got)
+	}
+
+	got, err = parseUpgradeArgs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != "" || got.Force {
+		t.Fatalf("unexpected default upgrade options: %+v", got)
+	}
+}
+
+func TestParseUpgradeRejectsUnknownArg(t *testing.T) {
+	_, err := parseUpgradeArgs([]string{"--apply"})
+	if err == nil || !strings.Contains(err.Error(), "usage: kiss upgrade") {
+		t.Fatalf("expected upgrade usage error, got %v", err)
 	}
 }
 

@@ -25,11 +25,11 @@ func run(args []string) error {
 		printHelp()
 		return nil
 	}
-	if remaining[0] == "--version" || remaining[0] == "version" {
+	if isVersionCommand(remaining[0]) {
 		fmt.Println(kiss.Version)
 		return nil
 	}
-	if remaining[0] == "--help" || remaining[0] == "help" {
+	if isHelpCommand(remaining[0]) {
 		printHelp()
 		return nil
 	}
@@ -49,6 +49,8 @@ func run(args []string) error {
 		return runSkill(paths, remaining[1:])
 	case "update":
 		return runUpdate(paths, remaining[1:])
+	case "upgrade":
+		return runUpgrade(remaining[1:])
 	case "list":
 		return kiss.ListSkills(paths, os.Stdout)
 	case "show":
@@ -66,6 +68,41 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q", remaining[0])
 	}
+}
+
+func runUpgrade(args []string) error {
+	options, err := parseUpgradeArgs(args)
+	if err != nil {
+		return err
+	}
+	return kiss.UpgradeCLI(options, os.Stdout)
+}
+
+func parseUpgradeArgs(args []string) (kiss.UpgradeOptions, error) {
+	options := kiss.UpgradeOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--version":
+			if i+1 >= len(args) {
+				return kiss.UpgradeOptions{}, fmt.Errorf("%s requires a value", args[i])
+			}
+			options.Version = args[i+1]
+			i++
+		case "--force":
+			options.Force = true
+		default:
+			return kiss.UpgradeOptions{}, fmt.Errorf("usage: kiss upgrade [--version <version>] [--force]")
+		}
+	}
+	return options, nil
+}
+
+func isVersionCommand(arg string) bool {
+	return arg == "--version" || arg == "-v" || arg == "version"
+}
+
+func isHelpCommand(arg string) bool {
+	return arg == "--help" || arg == "-h" || arg == "help"
 }
 
 func runSetup(args []string) error {
@@ -446,10 +483,12 @@ Usage:
   kiss [--kiss-home <path>] import (--skill <name> | --all) [--dry-run]
   kiss [--kiss-home <path>] run <name> [args...]
   kiss [--kiss-home <path>] update <name>[@ref] [--yes]
+  kiss upgrade [--version <version>] [--force]
   kiss [--kiss-home <path>] list
   kiss [--kiss-home <path>] show <name>
   kiss [--kiss-home <path>] remove <name>
   kiss [--kiss-home <path>] doctor
-  kiss --version
+  kiss --version | -v
+  kiss --help | -h
 `, kiss.Version)
 }
