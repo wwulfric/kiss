@@ -49,8 +49,10 @@ kiss setup --agent claude
 再把要使用的 skill 安装到 KISS 专属目录：
 
 ```bash
-kiss add vercel-labs/agent-skills --skill browser-test
+kiss add owner/repo --skill browser-test
 ```
+
+`kiss add` 的 source 和 flag 语法与 `npx skills add` 相同，可以直接把 `npx skills add ...` 换成 `kiss add ...`。
 
 ### 使用 Skill
 
@@ -68,31 +70,46 @@ kiss run browser-test url=https://example.com
 
 ## 管理 Skill
 
-安装本地 skill：
+`kiss add` 的安装语法跟随 `npx skills add`：source 写法、skill 选择和发现规则（`skills/`、`.agents/skills`、`.claude/skills`、
+plugin manifest 等）都相同，能被 `npx skills` 安装的仓库也能被 `kiss add` 安装。
 
 ```bash
-kiss add ./path/to/skill
-kiss add file:///abs/path/to/skill --name browser-test
-```
+# 列出 source 里可安装的 skill，不安装
+kiss add backnotprop/pstack --list
 
-安装 GitHub 仓库里的 skill：
-
-```bash
-# 安装仓库根目录里的单个 skill；本地名默认用 repo 名
+# 仓库里只有一个 skill 时直接安装；本地名取 SKILL.md frontmatter 的 name
 kiss add owner/repo
 
-# 指定 Git ref；@v1.0.0 可以是 tag、branch 或 commit
-kiss add github.com/owner/repo@v1.0.0
+# 选择 skill：@skill 简写，或 -s/--skill（可跟多个名称）
+kiss add backnotprop/pstack@tdd
+kiss add backnotprop/pstack --skill tdd why
 
-# 从多 skill 仓库中选择 skills/frontend-design
-kiss add vercel-labs/agent-skills --skill frontend-design
+# 安装全部 skill
+kiss add backnotprop/pstack --all
 
-# 指定 Git ref，同时选择仓库里的 browser-test skill
-kiss add github:owner/repo@main --skill browser-test
+# 指定 Git ref 用 #ref；#ref@skill 同时选择 skill
+kiss add 'owner/repo#v1.0.0'
+kiss add 'owner/repo#main@browser-test'
+kiss add https://github.com/owner/repo/tree/main/skills/browser-test
+
+# 仓库子路径
+kiss add owner/repo/.claude/skills
+
+# 本地目录（单个 skill 或多 skill 仓库）
+kiss add ./path/to/skill
+kiss add file:///abs/path/to/skill --name browser-test
 
 # 已有同名但确认要覆盖时使用 --force
-kiss add github:owner/repo --skill browser-test --force
+kiss add owner/repo@browser-test --force
 ```
+
+与 `npx skills add` 的差异：
+
+- 仓库里有多个 skill 且没有 `--skill`/`--all` 时，KISS 不弹交互选择，而是报错列出可选名称。
+- `-g`、`-y` 静默接受；`-a/--agent`、`--copy` 会被忽略，因为 KISS 只安装到自己的 store。
+- `--name`（单个 skill 时改本地名）和 `--force` 是 KISS 自己的 flag。
+- 注意 `owner/repo@xxx` 里的 `xxx` 是 skill 名，不是 Git ref；Git ref 要写成 `owner/repo#xxx`。
+- frontmatter 标记 `metadata.internal: true` 的 skill 默认不会被发现，显式 `--skill <name>` 点名时才安装，与 `npx skills` 一致。
 
 从 Vercel Skills CLI 的全局安装记录导入当前快照：
 

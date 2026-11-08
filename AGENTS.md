@@ -21,7 +21,7 @@
 ```text
 CLI 入口
   cmd/kiss/main.go
-    全局参数解析、子命令分发，以及 kiss add 的 source 解析。
+    全局参数解析、子命令分发，以及 kiss add 的 source/flag 解析（语法跟随 npx skills add）。
   cmd/kiss/main_test.go
     CLI 层参数解析和 runAdd 行为测试。
 
@@ -45,10 +45,14 @@ CLI 入口
       `kiss setup` 的 agent skill 安装逻辑；当前支持用户目录下的默认 .agents 和 Claude .claude 目录。
 
   安装与 source 处理（add/update 共用）
+    add.go
+      kiss add 的通用流程：打开 source、发现、按 --skill/--all 选择、校验后安装；也提供 --list 和 update 的 skill 定位。
     local.go
-      本地目录和 file:// source 解析，并调用通用安装核心。
+      本地目录和 file:// source 打开。
+    discovery.go
+      对齐 npx skills 的 skill 发现与 --skill 匹配规则（skills/、agent 目录、plugin manifest、metadata.internal 等）。
     remote.go
-      GitHub source 解析、ref 到 commit 解析、下载、sha256 记录和安全解包。
+      GitHub source 解析、ref 到 commit 解析、下载、sha256 记录和安全解包；link 只在落入选中 skill 时拒绝。
     import_skills.go
       从 Vercel Skills CLI 全局 lock 和 canonical copy 导入当前快照；优先还原真实来源，失败时保留导入快照来源。
     install.go
@@ -77,6 +81,7 @@ CLI 入口
     remote_test.go
     import_skills_test.go
     update_test.go
+    discovery_test.go
     skill_descriptor_test.go
     folder_hash_test.go
     setup_test.go
@@ -102,6 +107,7 @@ KISS bridge skill
 项目私有 agent skills
   .agents/skills/release/SKILL.md
     仅用于本项目发布：验证、打 tag、触发手动 GitHub Release workflow、校验产物。
+    frontmatter 带 metadata.internal: true，避免被 npx skills / kiss add 从本仓库发现；新增私有 skill 时同样处理。
 
 安装与发布脚本
   scripts/install.sh

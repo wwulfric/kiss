@@ -132,6 +132,31 @@ KISS 的输出是给 agent 消费的 Markdown 上下文，不是一个独立执�
 
 KISS 的核心状态规模很小，优先使用可读、可审计、易删除的本地索引。分析型存储或复杂数据库不进入核心路径。
 
+### 8.5 安装语法与 source 发现跟随 npx skills
+
+`kiss add` 的安装语法跟随 Vercel Skills CLI（`npx skills add`）：同一条命令把 `npx skills` 换成 `kiss` 后应选中相同的 skill，
+用户不需要为 KISS 改写仓库结构或学习另一套 source 语法。
+
+source 语法：`owner/repo`、`owner/repo/path`、`owner/repo@skill`、`#ref` 与 `#ref@skill` 片段、`github:` 前缀、`github.com`
+URL（含 `/tree/<ref>/<path>`），以及本地路径。`@` 在 source 中只表示 skill，Git ref 只用 `#ref` 表达。flag 语法：`-s/--skill`
+（可多个，`*` 表示全部）、`--all`、`-l/--list`、`--full-depth`。只影响 agent 目录安装的 flag（`-g`、`-y`、`-a`、`--copy`）被接受但
+不生效。KISS 只支持其中的本地路径和 GitHub source。
+
+发现规则：
+KISS 跟随 npx skills 的发现规则：被点名目录自身含 `SKILL.md` 时只取它；否则依次搜索 `skills/`（含 `.curated`、`.experimental`、
+`.system`）、各 agent 的项目 skill 目录（如 `.agents/skills`、`.claude/skills`）、`skills.sh.json` 和 `.claude-plugin` manifest
+声明的位置；都没有时再做有限深度的全量搜索。frontmatter 标记 `metadata.internal: true` 的 skill 默认隐藏，source 仓库通过
+`skills-lock.json` 引入的第三方 skill 不计入。
+
+差异和约束：
+
+- KISS 不做交互选择：source 含多个 skill 且未指定 `--skill`/`--all` 时报错列出候选；点名但不存在的 skill 直接报错。
+- `--skill` 按 frontmatter `name` 匹配（大小写、空格/下划线不敏感），并兼容按目录名匹配；显式点名时可选中 internal skill。
+- 多 skill 安装先完成全部校验（命名冲突、异源保护、link 检查）再写 store。
+- metadata 记录实际选中的 skill 路径，`update` 据此精确刷新，同源判断也与 `kiss import` 记录的路径一致。
+- `kiss update <name>@ref` 不属于安装语法，保持原样。
+- 远程 archive 中的 link 条目永远不会写到磁盘；只有落在被选中 skill 目录内的 link 才会导致安装失败。
+
 ## 9. 参考资料
 
 - Vercel Skills: `https://vercel.com/docs/agent-resources/skills`

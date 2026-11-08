@@ -3,6 +3,7 @@ package kiss
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -13,39 +14,33 @@ func AddLocalSkill(paths Paths, sourcePath, name string) error {
 	return AddLocalSkillWithOptions(paths, sourcePath, name, AddOptions{})
 }
 
-// AddLocalSkillWithOptions 从本地 source 安装 skill，并按 options 处理同名异源替换。
+// AddLocalSkillWithOptions 从本地 source 安装 skill；skill 选择和替换规则见 AddSkills。
 func AddLocalSkillWithOptions(paths Paths, sourcePath, name string, options AddOptions) error {
-	if err := ValidateSkillName(name); err != nil {
-		return err
-	}
-	absSource, err := NormalizeLocalSourcePath(sourcePath)
-	if err != nil {
-		return err
-	}
-	source := SourceMetadata{Kind: "local", URI: absSource}
-	if err := paths.EnsureBase(); err != nil {
-		return err
-	}
-	if err := ensureAddSourceAllowed(paths, name, source, options.Force); err != nil {
-		return err
-	}
-	return installSkillFromDir(paths, absSource, name, "local:"+absSource, source)
+	_, err := AddSkills(paths, sourcePath, name, options)
+	return err
 }
 
-// InferLocalSkillName 根据本地 source 的 SKILL.md 入口推断 skill name。
-func InferLocalSkillName(sourcePath string) (string, error) {
+// openLocalSkillSource 把本地目录或 file:// URL 作为可供发现的 source。
+func openLocalSkillSource(sourcePath string) (*skillSource, error) {
 	absSource, err := NormalizeLocalSourcePath(sourcePath)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	descriptor, err := LoadSkillDescriptor(absSource)
+	info, err := os.Stat(absSource)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if err := ValidateSkillName(descriptor.Name); err != nil {
-		return "", err
+	if !info.IsDir() {
+		return nil, fmt.Errorf("source must be a directory")
 	}
-	return descriptor.Name, nil
+	return &skillSource{
+		root:    absSource,
+		cleanup: func() {},
+		check:   func(discoveredSkill) error { return nil },
+		metadata: func(skill discoveredSkill) (SourceMetadata, string) {
+			return SourceMetadata{Kind: "local", URI: skill.Dir}, "local:" + skill.Dir
+		},
+	}, nil
 }
 
 // NormalizeLocalSourcePath 把本地路径和支持的 file:// URL 转成绝对路径。

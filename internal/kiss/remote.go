@@ -49,59 +49,97 @@ func AddRemoteSkill(paths Paths, sourceSpec, name string) error {
 	return AddRemoteSkillWithOptions(paths, sourceSpec, name, AddOptions{})
 }
 
-// AddRemoteSkillWithOptions 从远程 source 安装 skill，并按 options 处理同名异源替换。
+// AddRemoteSkillWithOptions 从 GitHub source 安装 skill；skill 选择和替换规则见 AddSkills。
 func AddRemoteSkillWithOptions(paths Paths, sourceSpec, name string, options AddOptions) error {
-	if err := ValidateSkillName(name); err != nil {
-		return err
+	if !strings.HasPrefix(sourceSpec, "github:") {
+		return fmt.Errorf("unsupported remote source %q", sourceSpec)
 	}
-	resolved, downloadURL, subdir, err := ResolveRemoteSource(sourceSpec)
+	_, err := AddSkills(paths, sourceSpec, name, options)
+	return err
+}
+
+// openRemoteSkillSource 下载并解包 GitHub source，返回可供发现的仓库目录。
+func openRemoteSkillSource(paths Paths, sourceSpec string) (*skillSource, error) {
+	gh, err := ParseGitHubSource(sourceSpec)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	resolved, downloadURL, _, err := ResolveRemoteSource(sourceSpec)
+	if err != nil {
+		return nil, err
 	}
 	if err := paths.EnsureBase(); err != nil {
-		return err
+		return nil, err
 	}
-	resolvedSource := SourceMetadata{
-		Kind:     resolved.Kind,
-		URI:      resolved.URI,
-		Ref:      resolved.Ref,
-		Resolved: resolved.Resolved,
-	}
-	if err := ensureAddSourceAllowed(paths, name, resolvedSource, options.Force); err != nil {
-		return err
-	}
-	archivePath, sum, err := downloadArchive(paths, downloadURL, name)
+	archivePath, sum, err := downloadArchive(paths, downloadURL, gh.Repo)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	tmpParent := filepath.Join(paths.Home, ".tmp")
 	if err := os.MkdirAll(tmpParent, 0o755); err != nil {
-		return err
+		return nil, err
 	}
-	extractDir, err := os.MkdirTemp(tmpParent, name+"-remote-")
+	extractDir, err := os.MkdirTemp(tmpParent, "remote-")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer func() { _ = os.RemoveAll(extractDir) }()
-	if err := extractTarGz(archivePath, extractDir); err != nil {
-		return err
+	cleanup := func() { _ = os.RemoveAll(extractDir) }
+	skippedLinks, err := extractSkillSourceTarGz(archivePath, extractDir)
+	if err != nil {
+		cleanup()
+		return nil, err
 	}
-	var skillDir string
-	if subdir != "" {
-		found, err := findExtractedSubdir(extractDir, subdir)
-		if err != nil {
-			return err
+	repoRoot, err := archiveRepoRoot(extractDir)
+	if err != nil {
+		cleanup()
+		return nil, err
+	}
+	return &skillSource{
+		root:    repoRoot,
+		subpath: gh.Path,
+		cleanup: cleanup,
+		check: func(skill discoveredSkill) error {
+			return rejectLinksInSkill(extractDir, skill.Dir, skippedLinks)
+		},
+		metadata: func(skill discoveredSkill) (SourceMetadata, string) {
+			uri := gh.Owner + "/" + gh.Repo
+			if skill.RelPath != "" {
+				uri += "/" + skill.RelPath
+			}
+			return SourceMetadata{
+				Kind:     resolved.Kind,
+				URI:      uri,
+				Ref:      resolved.Ref,
+				Resolved: resolved.Resolved,
+				SHA256:   sum,
+			}, "github:" + uri
+		},
+	}, nil
+}
+
+// rejectLinksInSkill 拒绝落在选定 skill 目录内的 archive link 条目，与本地安装拒绝 symlink 的规则一致。
+func rejectLinksInSkill(extractDir, skillDir string, links []string) error {
+	for _, link := range links {
+		if isContainedPath(filepath.Join(extractDir, filepath.FromSlash(link)), skillDir) {
+			return fmt.Errorf("archive contains link entry (not allowed): %s", link)
 		}
-		skillDir = found
-	} else {
-		found, err := findArchiveSkillRoot(extractDir)
-		if err != nil {
-			return err
-		}
-		skillDir = found
 	}
-	resolvedSource.SHA256 = sum
-	return installSkillFromDir(paths, skillDir, name, resolved.FullName, resolvedSource)
+	return nil
+}
+
+// archiveRepoRoot 返回解包后的仓库根目录；GitHub codeload tarball 会多包一层 <repo>-<sha>/ 目录。
+func archiveRepoRoot(extractDir string) (string, error) {
+	if hasSkillMd(extractDir) {
+		return extractDir, nil
+	}
+	entries, err := os.ReadDir(extractDir)
+	if err != nil {
+		return "", err
+	}
+	if len(entries) == 1 && entries[0].IsDir() {
+		return filepath.Join(extractDir, entries[0].Name()), nil
+	}
+	return extractDir, nil
 }
 
 // ResolveRemoteSource 把 remote source 解析成 metadata、下载 URL 和可选 archive 子目录。
@@ -279,16 +317,28 @@ func configuredRemoteTimeout(envName string, fallback time.Duration) time.Durati
 }
 
 func extractTarGz(archivePath, dest string) error {
-	// 远程 archive 只允许普通文件和目录；拒绝 link 和越界路径，避免解包写出目标目录。
+	_, err := extractTarGzWithLinkPolicy(archivePath, dest, false)
+	return err
+}
+
+// extractSkillSourceTarGz 解包 skill source archive；link 条目不会写到磁盘，而是返回其 slash 路径，
+// 由调用方在选定 skill 后判断：只有落在被安装 skill 目录内的 link 才拒绝，仓库其他位置的 link 不影响安装。
+func extractSkillSourceTarGz(archivePath, dest string) ([]string, error) {
+	return extractTarGzWithLinkPolicy(archivePath, dest, true)
+}
+
+func extractTarGzWithLinkPolicy(archivePath, dest string, skipLinks bool) ([]string, error) {
+	// 远程 archive 只允许写出普通文件和目录；link 要么拒绝、要么跳过，越界路径一律拒绝，避免解包写出目标目录。
 	cleanDest := filepath.Clean(dest)
+	var skippedLinks []string
 	file, err := os.Open(archivePath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = file.Close() }()
 	gz, err := gzip.NewReader(file)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
@@ -296,55 +346,62 @@ func extractTarGz(archivePath, dest string) error {
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
-			return nil
+			return skippedLinks, nil
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 		target, err := safeArchiveTarget(cleanDest, header.Name)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		switch header.Typeflag {
 		case tar.TypeXHeader, tar.TypeXGlobalHeader, tar.TypeGNULongName, tar.TypeGNULongLink:
 			continue
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
+				return nil, err
 			}
 		case tar.TypeReg:
 			if header.Size < 0 {
-				return fmt.Errorf("invalid archive entry size for %s", header.Name)
+				return nil, fmt.Errorf("invalid archive entry size for %s", header.Name)
 			}
 			if totalExtracted+header.Size > maxExtractedArchiveBytes {
-				return fmt.Errorf("extracted archive exceeds maximum allowed size of %d bytes", maxExtractedArchiveBytes)
+				return nil, fmt.Errorf("extracted archive exceeds maximum allowed size of %d bytes", maxExtractedArchiveBytes)
 			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
+				return nil, err
 			}
 			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode).Perm())
 			if err != nil {
-				return err
+				return nil, err
 			}
 			n, copyErr := io.Copy(out, io.LimitReader(tr, header.Size+1))
 			closeErr := out.Close()
 			if copyErr != nil {
-				return copyErr
+				return nil, copyErr
 			}
 			if n > header.Size {
-				return fmt.Errorf("archive entry %s exceeds declared size", header.Name)
+				return nil, fmt.Errorf("archive entry %s exceeds declared size", header.Name)
 			}
 			if n != header.Size {
-				return fmt.Errorf("archive entry %s size mismatch: %w", header.Name, io.ErrUnexpectedEOF)
+				return nil, fmt.Errorf("archive entry %s size mismatch: %w", header.Name, io.ErrUnexpectedEOF)
 			}
 			if closeErr != nil {
-				return closeErr
+				return nil, closeErr
 			}
 			totalExtracted += n
 		case tar.TypeSymlink, tar.TypeLink:
-			return fmt.Errorf("archive contains link entry (not allowed): %s", header.Name)
+			if !skipLinks {
+				return nil, fmt.Errorf("archive contains link entry (not allowed): %s", header.Name)
+			}
+			rel, err := filepath.Rel(cleanDest, target)
+			if err != nil {
+				return nil, err
+			}
+			skippedLinks = append(skippedLinks, filepath.ToSlash(rel))
 		default:
-			return fmt.Errorf("unsupported archive entry type for %s", header.Name)
+			return nil, fmt.Errorf("unsupported archive entry type for %s", header.Name)
 		}
 	}
 }
@@ -367,56 +424,4 @@ func safeArchiveTarget(dest, name string) (string, error) {
 		return "", fmt.Errorf("unsafe path in archive: %s", name)
 	}
 	return target, nil
-}
-
-func findExtractedSubdir(root, subdir string) (string, error) {
-	cleanSubdir := filepath.Clean(subdir)
-	if cleanSubdir == "." || filepath.IsAbs(cleanSubdir) || strings.HasPrefix(cleanSubdir, "..") {
-		return "", fmt.Errorf("unsafe subdir %q", subdir)
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return "", err
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		candidate := filepath.Join(root, entry.Name(), cleanSubdir)
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate, nil
-		}
-	}
-	candidate := filepath.Join(root, cleanSubdir)
-	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-		return candidate, nil
-	}
-	return "", fmt.Errorf("skill subdir %q not found in archive", subdir)
-}
-
-func findArchiveSkillRoot(root string) (string, error) {
-	if _, err := os.Stat(filepath.Join(root, "SKILL.md")); err == nil {
-		return root, nil
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return "", err
-	}
-	var matches []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		candidate := filepath.Join(root, entry.Name())
-		if _, err := os.Stat(filepath.Join(candidate, "SKILL.md")); err == nil {
-			matches = append(matches, candidate)
-		}
-	}
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-	if len(matches) == 0 {
-		return "", fmt.Errorf("archive does not contain SKILL.md at root or single top-level directory")
-	}
-	return "", fmt.Errorf("archive contains multiple top-level skill directories; use a source with explicit path")
 }

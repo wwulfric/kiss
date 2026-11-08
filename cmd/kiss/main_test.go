@@ -49,100 +49,141 @@ func TestTopLevelCommandAliases(t *testing.T) {
 	}
 }
 
-func TestResolveAddRequestGitHubShorthandWithSkill(t *testing.T) {
-	source, name, err := resolveAddRequest(addRequest{
-		source: "vercel-labs/agent-skills",
-		skill:  "frontend-design",
-	})
-	if err != nil {
-		t.Fatal(err)
+func TestResolveAddSourceFollowsNpxSkillsGrammar(t *testing.T) {
+	tests := []struct {
+		input      string
+		wantSource string
+		wantSkill  string
+	}{
+		{"owner/repo", "github:owner/repo", ""},
+		{"owner/repo@tdd", "github:owner/repo", "tdd"},
+		{"owner/repo/.claude/skills", "github:owner/repo/.claude/skills", ""},
+		{"owner/repo/sub@x", "github:owner/repo/sub@x#", ""},
+		{"owner/repo#v1", "github:owner/repo#v1", ""},
+		{"owner/repo#v1@tdd", "github:owner/repo#v1", "tdd"},
+		{"owner/repo#@tdd", "github:owner/repo", "tdd"},
+		{"github:owner/repo@tdd", "github:owner/repo", "tdd"},
+		{"github:owner/repo/skills#main", "github:owner/repo/skills#main", ""},
+		{"https://github.com/owner/repo", "github:owner/repo", ""},
+		{"https://github.com/owner/repo.git", "github:owner/repo", ""},
+		{"github.com/owner/repo", "github:owner/repo", ""},
+		{"https://github.com/owner/repo/tree/main", "github:owner/repo#main", ""},
+		{"https://github.com/owner/repo/tree/main/skills/tdd", "github:owner/repo/skills/tdd#main", ""},
+		{"https://github.com/owner/repo#feature%2Fx@tdd", "github:owner/repo#feature/x", "tdd"},
+		{"vercel-labs/vercel-skills", "github:vercel-labs/agent-skills", ""},
 	}
-	if source != "github:vercel-labs/agent-skills/skills/frontend-design" {
-		t.Fatalf("unexpected source: %q", source)
-	}
-	if name != "frontend-design" {
-		t.Fatalf("unexpected name: %q", name)
-	}
-}
-
-func TestResolveAddRequestGitHubAtRefWithSkill(t *testing.T) {
-	source, name, err := resolveAddRequest(addRequest{
-		source: "github.com/owner/repo@v1.0.0",
-		skill:  "browser-test",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if source != "github:owner/repo/skills/browser-test@v1.0.0" || name != "browser-test" {
-		t.Fatalf("unexpected source/name: %q %q", source, name)
-	}
-}
-
-func TestResolveAddRequestOwnerRepoAtRef(t *testing.T) {
-	source, name, err := resolveAddRequest(addRequest{
-		source: "owner/repo@feature/test",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if source != "github:owner/repo@feature/test" || name != "repo" {
-		t.Fatalf("unexpected source/name: %q %q", source, name)
+	for _, tt := range tests {
+		got, err := resolveAddSource(tt.input)
+		if err != nil {
+			t.Fatalf("%s: %v", tt.input, err)
+		}
+		if got.source != tt.wantSource || got.skill != tt.wantSkill {
+			t.Fatalf("%s: got source=%q skill=%q, want %q %q", tt.input, got.source, got.skill, tt.wantSource, tt.wantSkill)
+		}
 	}
 }
 
-func TestParseAddArgsForce(t *testing.T) {
-	got, err := parseAddArgs([]string{"owner/repo", "--skill", "browser-test", "--force"})
+func TestResolveAddSourceLocalPaths(t *testing.T) {
+	for _, input := range []string{"./skills/tdd", "../x", ".", "/abs/path", "~/skills/x", "file:///abs/x"} {
+		got, err := resolveAddSource(input)
+		if err != nil || got.source != input {
+			t.Fatalf("%s: expected local source, got %+v err=%v", input, got, err)
+		}
+	}
+}
+
+func TestResolveAddSourceRejectsUnsupported(t *testing.T) {
+	for _, input := range []string{"browser-test", "https://example.com/browser-test.tar.gz", "gitlab:group/repo", "owner/repo/../x"} {
+		if _, err := resolveAddSource(input); err == nil {
+			t.Fatalf("%s: expected error", input)
+		}
+	}
+	_, err := resolveAddSource("github.com/owner/repo@v1.0.0")
+	if err == nil || !strings.Contains(err.Error(), "#v1.0.0") {
+		t.Fatalf("expected #ref hint for old URL @ref syntax, got %v", err)
+	}
+}
+
+func TestParseAddArgsFollowsNpxSkillsFlags(t *testing.T) {
+	got, err := parseAddArgs([]string{"owner/repo", "-s", "tdd", "why", "--skill", "teach", "-y", "-g", "-a", "claude-code", "codex", "--copy", "--full-depth", "--force"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.force || got.source != "owner/repo" || got.skill != "browser-test" {
+	if got.source != "owner/repo" || strings.Join(got.skills, ",") != "tdd,why,teach" || !got.force || !got.fullDepth {
 		t.Fatalf("unexpected add request: %+v", got)
 	}
+	if strings.Join(got.ignored, ",") != "-a,--copy" {
+		t.Fatalf("unexpected ignored flags: %v", got.ignored)
+	}
+	got, err = parseAddArgs([]string{"owner/repo", "--all", "-l"})
+	if err != nil || !got.all || !got.list {
+		t.Fatalf("unexpected add request: %+v err=%v", got, err)
+	}
+	if _, err := parseAddArgs([]string{"owner/repo", "--skill", "skills/tdd"}); err == nil || !strings.Contains(err.Error(), "skill name") {
+		t.Fatalf("expected --skill path rejection, got %v", err)
+	}
+	if _, err := parseAddArgs([]string{"owner/repo", "--skill"}); err == nil {
+		t.Fatal("expected --skill without value error")
+	}
+	if _, err := parseAddArgs([]string{"owner/repo", "--bogus"}); err == nil {
+		t.Fatal("expected unknown flag error")
+	}
 }
 
-func TestResolveAddRequestGitHubURL(t *testing.T) {
-	source, name, err := resolveAddRequest(addRequest{
-		source: "https://github.com/owner/repo",
-	})
+func writeLocalSkillRepo(t *testing.T, names ...string) string {
+	t.Helper()
+	repo := t.TempDir()
+	for _, name := range names {
+		dir := filepath.Join(repo, "skills", name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := "---\nname: " + name + "\ndescription: " + name + " skill\n---\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return repo
+}
+
+func TestRunAddLocalMultiSkillRepo(t *testing.T) {
+	paths, err := kiss.NewPaths(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source != "github:owner/repo" || name != "repo" {
-		t.Fatalf("unexpected source/name: %q %q", source, name)
+	repo := writeLocalSkillRepo(t, "tdd", "why", "teach")
+	err = runAdd(paths, []string{repo})
+	if err == nil || !strings.Contains(err.Error(), "use --skill") || !strings.Contains(err.Error(), "tdd, teach, why") {
+		t.Fatalf("expected multi-skill hint, got %v", err)
+	}
+	if err := runAdd(paths, []string{repo, "-s", "why", "tdd"}); err != nil {
+		t.Fatalf("add -s why tdd: %v", err)
+	}
+	for _, name := range []string{"why", "tdd"} {
+		metadata, ok, err := kiss.GetSkillMetadata(paths, name)
+		if err != nil || !ok {
+			t.Fatalf("%s metadata missing ok=%v err=%v", name, ok, err)
+		}
+		if metadata.Source.URI != filepath.Join(repo, "skills", name) {
+			t.Fatalf("unexpected source metadata: %+v", metadata.Source)
+		}
+	}
+	if err := runAdd(paths, []string{repo, "--all"}); err != nil {
+		t.Fatalf("add --all: %v", err)
+	}
+	if _, ok, _ := kiss.GetSkillMetadata(paths, "teach"); !ok {
+		t.Fatal("expected --all to install teach")
 	}
 }
 
-func TestResolveAddRequestRejectsGenericHTTPS(t *testing.T) {
-	_, _, err := resolveAddRequest(addRequest{
-		source: "https://example.com/browser-test.tar.gz",
-		name:   "browser-test",
-	})
-	if err == nil || !strings.Contains(err.Error(), "--name is only supported") {
-		t.Fatalf("expected generic https rejection, got %v", err)
-	}
-	if strings.Contains(err.Error(), "tarball") {
-		t.Fatalf("generic https rejection should not mention tarball support: %v", err)
-	}
-}
-
-func TestResolveAddRequestRejectsBareName(t *testing.T) {
-	_, _, err := resolveAddRequest(addRequest{source: "browser-test"})
-	if err == nil || !strings.Contains(err.Error(), "unsupported add source") {
-		t.Fatalf("expected bare source rejection, got %v", err)
-	}
-}
-
-func TestParseAddRejectsOldSkillAliasForLocalPaths(t *testing.T) {
-	source := filepath.Join(t.TempDir(), "local-skill")
-	if err := os.MkdirAll(source, 0o755); err != nil {
+func TestPrintSourceSkills(t *testing.T) {
+	var out strings.Builder
+	err := printSourceSkills(&out, []kiss.SourceSkill{{Name: "root", Description: "d"}, {Name: "tdd", Path: "skills/tdd", Description: "t"}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("local\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, _, err := resolveAddRequest(addRequest{source: source, skill: "alias"})
-	if err == nil || !strings.Contains(err.Error(), "GitHub sources") {
-		t.Fatalf("expected --skill local path rejection, got %v", err)
+	if out.String() != "root\t.\td\ntdd\tskills/tdd\tt\n" {
+		t.Fatalf("unexpected list output: %q", out.String())
 	}
 }
 
