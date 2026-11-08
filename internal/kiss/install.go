@@ -10,11 +10,6 @@ import (
 	"time"
 )
 
-// AddOptions 控制显式 add 命令的替换行为。
-type AddOptions struct {
-	Force bool
-}
-
 func installSkillFromDir(paths Paths, sourcePath, name, fullName string, source SourceMetadata) error {
 	if err := ValidateSkillName(name); err != nil {
 		return err

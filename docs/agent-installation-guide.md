@@ -130,7 +130,7 @@ kiss run find-skills "browser testing"
 
 预期行为：
 
-1. `kiss add` 成功；如果同名但不同来源已安装，会提示需要 `--force`。同一个 GitHub source 仅 `@ref` 不同时会按更新处理，不需要
+1. `kiss add` 成功；如果同名但不同来源已安装，会提示需要 `--force`。同一个 GitHub source 仅 `#ref` 不同时会按更新处理，不需要
    `--force`。
 2. `kiss run` 输出 `find-skills` 的 Markdown 上下文。
 3. 输出中只包含 `find-skills` 当前 skill，不暴露 KISS store 里的其他 skill。

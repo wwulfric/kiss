@@ -1,6 +1,8 @@
 ---
 name: release
 description: 仅用于 kiss 项目的发布流程：自动计算版本号、验证、打 tag、触发手动 GitHub Release workflow、校验产物。
+metadata:
+  internal: true
 ---
 
 # KISS Release Skill

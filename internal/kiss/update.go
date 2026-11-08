@@ -114,64 +114,21 @@ func previewSourceSpec(paths Paths, sourceSpec, name string) (updatePreview, fun
 }
 
 func previewRemoteSource(paths Paths, sourceSpec, name string) (updatePreview, func(), error) {
-	resolved, downloadURL, subdir, err := ResolveRemoteSource(sourceSpec)
+	fetched, cleanup, err := resolveSourceSkillForUpdate(paths, sourceSpec, name)
 	if err != nil {
 		return updatePreview{}, func() {}, err
 	}
-	if err := paths.EnsureBase(); err != nil {
-		return updatePreview{}, func() {}, err
-	}
-	archivePath, sum, err := downloadArchive(paths, downloadURL, name)
-	if err != nil {
-		return updatePreview{}, func() {}, err
-	}
-	tmpParent := filepath.Join(paths.Home, ".tmp")
-	if err := os.MkdirAll(tmpParent, 0o755); err != nil {
-		return updatePreview{}, func() {}, err
-	}
-	extractDir, err := os.MkdirTemp(tmpParent, "update-")
-	if err != nil {
-		return updatePreview{}, func() {}, err
-	}
-	cleanup := func() { _ = os.RemoveAll(extractDir) }
-	if err := extractTarGz(archivePath, extractDir); err != nil {
-		cleanup()
-		return updatePreview{}, func() {}, err
-	}
-	var skillDir string
-	if subdir != "" {
-		found, err := findExtractedSubdir(extractDir, subdir)
-		if err != nil {
-			cleanup()
-			return updatePreview{}, func() {}, err
-		}
-		skillDir = found
-	} else {
-		found, err := findArchiveSkillRoot(extractDir)
-		if err != nil {
-			cleanup()
-			return updatePreview{}, func() {}, err
-		}
-		skillDir = found
-	}
-	descriptor, err := LoadSkillDescriptor(skillDir)
+	descriptor, err := LoadSkillDescriptor(fetched.Skill.Dir)
 	if err != nil {
 		cleanup()
 		return updatePreview{}, func() {}, err
 	}
-	content, err := os.ReadFile(filepath.Join(skillDir, descriptor.Entry))
+	content, err := os.ReadFile(filepath.Join(fetched.Skill.Dir, descriptor.Entry))
 	if err != nil {
 		cleanup()
 		return updatePreview{}, func() {}, err
 	}
-	source := SourceMetadata{
-		Kind:     resolved.Kind,
-		URI:      resolved.URI,
-		Ref:      resolved.Ref,
-		Resolved: resolved.Resolved,
-		SHA256:   sum,
-	}
-	return updatePreview{Descriptor: descriptor, EntryContent: content, SourceSHA256: sum, Source: source, FullName: resolved.FullName}, cleanup, nil
+	return updatePreview{Descriptor: descriptor, EntryContent: content, SourceSHA256: fetched.Source.SHA256, Source: fetched.Source, FullName: fetched.FullName}, cleanup, nil
 }
 
 func printUpdatePlan(out io.Writer, name, applyTarget string, metadata SkillMetadata, current, targetPreview updatePreview, sourceSpec string) error {
@@ -246,7 +203,7 @@ func sourceSpecFromMetadataWithRef(metadata SkillMetadata, refOverride string) (
 			ref = refOverride
 		}
 		if ref != "" {
-			spec += "@" + ref
+			spec += "#" + ref
 		}
 		return spec, nil
 	case "skills-import":
@@ -256,11 +213,13 @@ func sourceSpecFromMetadataWithRef(metadata SkillMetadata, refOverride string) (
 	}
 }
 
+// installSourceSpec 用已记录的 source 重新安装同名 skill；update 是对同一 skill 的显式刷新，因此跳过异源保护。
 func installSourceSpec(paths Paths, sourceSpec, name string) error {
+	options := AddOptions{Force: true}
 	if strings.HasPrefix(sourceSpec, "github:") {
-		return AddRemoteSkill(paths, sourceSpec, name)
+		return AddRemoteSkillWithOptions(paths, sourceSpec, name, options)
 	}
-	return AddLocalSkill(paths, sourceSpec, name)
+	return AddLocalSkillWithOptions(paths, sourceSpec, name, options)
 }
 
 func updateInstalledMetadataFromPreview(paths Paths, name string, existing SkillMetadata, preview updatePreview) error {
