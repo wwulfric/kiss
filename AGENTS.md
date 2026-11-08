@@ -122,6 +122,8 @@ KISS bridge skill
     生成 Homebrew formula。
   .github/workflows/release.yml
     手动 release workflow，生成平台产物、checksums、Homebrew formula 和 cosign 签名产物。
+  .github/workflows/pages.yml
+    master 上 site/ 变更时把静态官网部署到 GitHub Pages（Pages Source 需设为 GitHub Actions）。
 
 工程配置
   .golangci.yml
