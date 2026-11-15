@@ -1,6 +1,7 @@
 # IDE and OS files
 .DS_Store
 .idea/
+.claude/
 
 # Local build outputs
 /bin/
